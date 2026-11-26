@@ -18,7 +18,7 @@ import { buildRecoveryPlans } from '../utils/survivalPredictor';
 
 export const RecoveryPage: React.FC = () => {
   const { user } = useAuth();
-  const { subjects, semester, recordStudentAttendance } = useAppState();
+  const { subjects, semester, featureControls, recordStudentAttendance } = useAppState();
 
   const plans = useMemo(() => buildRecoveryPlans(subjects, semester), [subjects, semester]);
 
@@ -115,12 +115,21 @@ export const RecoveryPage: React.FC = () => {
                       />
                       <p className="text-xs max-w-xs leading-relaxed">“{plan.heroAdvice}”</p>
                     </div>
-                    <button
-                      onClick={() => recordStudentAttendance(plan.subject.id, 'PRESENT', 'Recovery session attended')}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 px-4 py-3 text-xs font-extrabold text-emerald-500 dark:text-emerald-300 transition shrink-0"
-                    >
-                      <PlusCircle className="h-4 w-4" /> Log Next Class (+10🪙)
-                    </button>
+                    {featureControls.studentSelfAttendanceLocked ? (
+                      <Link
+                        to={featureControls.allowBunkSimulator ? '/simulator' : '/od'}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-[#00D9FF]/20 hover:bg-[#00D9FF]/30 border border-[#00D9FF]/40 px-4 py-3 text-xs font-extrabold text-cyan-600 dark:text-[#00D9FF] transition shrink-0"
+                      >
+                        {featureControls.allowBunkSimulator ? 'Simulate Streak →' : 'Request OD Credit →'}
+                      </Link>
+                    ) : (
+                      <button
+                        onClick={() => recordStudentAttendance(plan.subject.id, 'PRESENT', 'Recovery session attended')}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-2xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 px-4 py-3 text-xs font-extrabold text-emerald-500 dark:text-emerald-300 transition shrink-0"
+                      >
+                        <PlusCircle className="h-4 w-4" /> Log Next Class (+10🪙)
+                      </button>
+                    )}
                   </div>
                 </div>
 

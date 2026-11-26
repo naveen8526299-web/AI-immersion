@@ -30,6 +30,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useAppState } from '../contexts/AppStateContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
+import { FeatureControlFlags } from '../types';
 import { getLevelInfo } from '../utils/gamification';
 import { CommandPalette } from '../components/CommandPalette';
 import { CosmicBackdrop } from '../components/CosmicBackdrop';
@@ -44,18 +45,19 @@ interface NavItem {
   label: string;
   icon: React.ReactNode;
   roles?: Array<'STUDENT' | 'FACULTY' | 'ADMIN'>;
+  featureKey?: keyof FeatureControlFlags;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard', icon: <LayoutDashboard className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'] },
   { to: '/attendance', label: 'Subjects', icon: <BookOpen className="h-4 w-4" />, roles: ['STUDENT'] },
-  { to: '/simulator', label: 'Bunk Simulator', icon: <Sliders className="h-4 w-4" />, roles: ['STUDENT'] },
+  { to: '/simulator', label: 'Bunk Simulator', icon: <Sliders className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowBunkSimulator' },
   { to: '/predictor', label: 'Hall Ticket Radar', icon: <Compass className="h-4 w-4" />, roles: ['STUDENT'] },
   { to: '/recovery', label: 'Recovery Planner', icon: <Activity className="h-4 w-4" />, roles: ['STUDENT'] },
-  { to: '/od', label: 'Smart OD Credits', icon: <Briefcase className="h-4 w-4" />, roles: ['STUDENT'] },
-  { to: '/heroes', label: 'Hero Companions', icon: <Sparkles className="h-4 w-4" />, roles: ['STUDENT'] },
-  { to: '/armory', label: 'Hero Armory', icon: <Award className="h-4 w-4" />, roles: ['STUDENT'] },
-  { to: '/squad', label: 'Squad Connect', icon: <Users className="h-4 w-4" />, roles: ['STUDENT'] },
+  { to: '/od', label: 'Smart OD Credits', icon: <Briefcase className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowODRequests' },
+  { to: '/heroes', label: 'Hero Companions', icon: <Sparkles className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowHeroGamification' },
+  { to: '/armory', label: 'Hero Armory', icon: <Award className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowHeroGamification' },
+  { to: '/squad', label: 'Squad Connect', icon: <Users className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowSquadConnect' },
   { to: '/tasks', label: 'Tasks & Projects', icon: <CheckSquare className="h-4 w-4" />, roles: ['STUDENT'] },
   { to: '/semester', label: 'Semester Radar', icon: <Calendar className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'] },
   { to: '/insights', label: 'AI Insights', icon: <Flame className="h-4 w-4" />, roles: ['STUDENT'] },
@@ -68,7 +70,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export const AppShell: React.FC = () => {
   const { user, isDemoMode, logout } = useAuth();
-  const { unreadNotificationCount } = useAppState();
+  const { unreadNotificationCount, featureControls } = useAppState();
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -86,7 +88,11 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const visibleNav = NAV_ITEMS.filter((item) => !item.roles || (user && item.roles.includes(user.role)));
+  const visibleNav = NAV_ITEMS.filter((item) => {
+    if (item.roles && (!user || !item.roles.includes(user.role))) return false;
+    if (user?.role === 'STUDENT' && item.featureKey && !featureControls[item.featureKey]) return false;
+    return true;
+  });
   const levelInfo = getLevelInfo(user?.xp || 0);
 
   const handleLogout = async () => {
@@ -201,7 +207,7 @@ export const AppShell: React.FC = () => {
               <kbd className="rounded bg-slate-200 dark:bg-white/10 px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
             </button>
 
-            {user?.role === 'STUDENT' && (
+            {user?.role === 'STUDENT' && featureControls.allowHeroGamification && (
               <div className="hidden sm:flex items-center gap-3 rounded-xl bg-slate-100 dark:bg-[#17152D]/90 border border-slate-200/80 dark:border-violet-400/25 px-3 py-1.5 text-xs font-semibold">
                 <span className="inline-flex items-center gap-1.5 text-amber-600 dark:text-[#FFC857]">
                   <SpinningGoldCoin size={16} /> {user.coins} Coins
@@ -323,15 +329,17 @@ export const AppShell: React.FC = () => {
               <BookOpen className="h-4 w-4" />
               Subjects
             </NavLink>
-            <NavLink
-              to="/simulator"
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-0.5 text-[10px] font-semibold ${isActive ? 'text-electric-500' : 'text-slate-500'}`
-              }
-            >
-              <Sliders className="h-4 w-4" />
-              Simulator
-            </NavLink>
+            {featureControls.allowBunkSimulator && (
+              <NavLink
+                to="/simulator"
+                className={({ isActive }) =>
+                  `flex flex-col items-center gap-0.5 text-[10px] font-semibold ${isActive ? 'text-electric-500' : 'text-slate-500'}`
+                }
+              >
+                <Sliders className="h-4 w-4" />
+                Simulator
+              </NavLink>
+            )}
             <NavLink
               to="/predictor"
               className={({ isActive }) =>
@@ -341,15 +349,17 @@ export const AppShell: React.FC = () => {
               <Compass className="h-4 w-4" />
               Predictor
             </NavLink>
-            <NavLink
-              to="/squad"
-              className={({ isActive }) =>
-                `flex flex-col items-center gap-0.5 text-[10px] font-semibold ${isActive ? 'text-electric-500' : 'text-slate-500'}`
-              }
-            >
-              <Users className="h-4 w-4" />
-              Squad
-            </NavLink>
+            {featureControls.allowSquadConnect && (
+              <NavLink
+                to="/squad"
+                className={({ isActive }) =>
+                  `flex flex-col items-center gap-0.5 text-[10px] font-semibold ${isActive ? 'text-electric-500' : 'text-slate-500'}`
+                }
+              >
+                <Users className="h-4 w-4" />
+                Squad
+              </NavLink>
+            )}
           </>
         )}
         {user?.role === 'FACULTY' && (

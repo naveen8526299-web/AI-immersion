@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Calendar, Download, History, Plus, Printer, RotateCcw, Trash2, X } from 'lucide-react';
+import { Calendar, Download, History, Lock, Plus, Printer, RotateCcw, Trash2, X } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { SubjectCard } from '../components/SubjectCard';
 import { useAppState } from '../contexts/AppStateContext';
 import { Subject } from '../types';
@@ -7,8 +8,18 @@ import { evaluateAttendance } from '../utils/attendanceMath';
 import { toLocalDateIso } from '../utils/dateUtils';
 
 export const AttendancePage: React.FC = () => {
-  const { subjects, records, addSubject, updateSubject, deleteSubject, recordStudentAttendance, undoAttendanceRecord } =
-    useAppState();
+  const {
+    subjects,
+    records,
+    featureControls,
+    addSubject,
+    updateSubject,
+    deleteSubject,
+    recordStudentAttendance,
+    undoAttendanceRecord,
+  } = useAppState();
+  const isLocked = featureControls.studentSelfAttendanceLocked;
+  const canManageSubjects = featureControls.allowStudentSubjectManagement;
 
   const [showForm, setShowForm] = useState(false);
   const [editingSubject, setEditingSubject] = useState<Subject | null>(null);
@@ -138,14 +149,35 @@ export const AttendancePage: React.FC = () => {
           >
             <Printer className="h-3.5 w-3.5" /> Print Summary
           </button>
-          <button
-            onClick={openAdd}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 px-4 py-2 text-xs font-extrabold text-slate-950 shadow-lg hover:brightness-110 transition"
-          >
-            <Plus className="h-4 w-4" /> Add Subject
-          </button>
+          {canManageSubjects && (
+            <button
+              onClick={openAdd}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 px-4 py-2 text-xs font-extrabold text-slate-950 shadow-lg hover:brightness-110 transition"
+            >
+              <Plus className="h-4 w-4" /> Add Subject
+            </button>
+          )}
         </div>
       </div>
+
+      {isLocked && (
+        <div className="rounded-2xl border border-[#00D9FF]/35 bg-[#00D9FF]/10 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-start gap-2.5 text-slate-700 dark:text-slate-200">
+            <Lock className="h-4 w-4 text-[#00D9FF] shrink-0 mt-0.5" />
+            <div>
+              <strong className="text-[#00D9FF]">College ERP Lock Active:</strong> Only authorized Faculty and College Administration can record or modify official attendance counts. Need a correction or On-Duty credit?
+            </div>
+          </div>
+          {featureControls.allowODRequests && (
+            <Link
+              to="/od"
+              className="rounded-xl bg-[#00D9FF]/20 border border-[#00D9FF]/40 px-3.5 py-2 font-bold text-cyan-700 dark:text-[#00D9FF] hover:bg-[#00D9FF]/30 transition shrink-0 self-start sm:self-center"
+            >
+              Submit OD / Correction →
+            </Link>
+          )}
+        </div>
+      )}
 
       {/* Streak Calendar */}
       <div className="glass-card rounded-2xl p-4 sm:p-5">
@@ -180,14 +212,18 @@ export const AttendancePage: React.FC = () => {
         <div className="glass-card rounded-3xl p-8 text-center space-y-3">
           <h2 className="font-display text-xl font-bold">No Subjects Added Yet</h2>
           <p className="text-xs text-slate-500 dark:text-slate-300 max-w-md mx-auto">
-            Add your real college subjects along with your current attended and conducted class counts to start daily tracking.
+            {canManageSubjects
+              ? 'Add your real college subjects along with your current attended and conducted class counts to start daily tracking.'
+              : 'Subjects are provisioned by College Administration and will appear here once assigned.'}
           </p>
-          <button
-            onClick={openAdd}
-            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 px-5 py-2.5 text-xs font-extrabold text-slate-950"
-          >
-            <Plus className="h-4 w-4" /> Add Your First Subject
-          </button>
+          {canManageSubjects && (
+            <button
+              onClick={openAdd}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 px-5 py-2.5 text-xs font-extrabold text-slate-950"
+            >
+              <Plus className="h-4 w-4" /> Add Your First Subject
+            </button>
+          )}
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -246,7 +282,7 @@ export const AttendancePage: React.FC = () => {
                   <td className="py-2.5 pr-3">{r.updatedBy}</td>
                   <td className="py-2.5 pr-3 text-slate-500">{r.note || '—'}</td>
                   <td className="py-2.5">
-                    {r.source === 'STUDENT_SELF' ? (
+                    {!isLocked && r.source === 'STUDENT_SELF' ? (
                       <button
                         onClick={() => undoAttendanceRecord(r.id)}
                         className="inline-flex items-center gap-1 rounded-lg bg-slate-200/70 dark:bg-white/10 px-2 py-1 text-[11px] font-bold hover:bg-rose-500/20 hover:text-rose-400 transition"
@@ -255,7 +291,7 @@ export const AttendancePage: React.FC = () => {
                         <RotateCcw className="h-3 w-3" /> Undo
                       </button>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-slate-400">{isLocked ? 'Locked' : '—'}</span>
                     )}
                   </td>
                 </tr>

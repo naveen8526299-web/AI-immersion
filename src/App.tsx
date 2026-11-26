@@ -1,13 +1,13 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
-import { AppStateProvider } from './contexts/AppStateContext';
+import { AppStateProvider, useAppState } from './contexts/AppStateContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AppShell } from './layouts/AppShell';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/LoginPage';
 import { RegisterPage } from './pages/RegisterPage';
-import { UserRole } from './types';
+import { FeatureControlFlags, UserRole } from './types';
 
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const ArmoryPage = lazy(() => import('./pages/ArmoryPage').then((m) => ({ default: m.ArmoryPage })));
@@ -31,9 +31,11 @@ const TasksPage = lazy(() => import('./pages/TasksPage').then((m) => ({ default:
 
 const ProtectedRoute: React.FC<{
   allowedRoles?: UserRole[];
+  requiredFeature?: keyof FeatureControlFlags;
   children: React.ReactElement;
-}> = ({ allowedRoles, children }) => {
+}> = ({ allowedRoles, requiredFeature, children }) => {
   const { user, loading } = useAuth();
+  const { featureControls } = useAppState();
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center text-sm">Loading AttendanceGuard...</div>;
   }
@@ -46,6 +48,16 @@ const ProtectedRoute: React.FC<{
         <h2 className="font-display text-xl font-bold text-rose-400">Access Restricted</h2>
         <p className="text-sm text-slate-500 dark:text-slate-300">
           Your role ({user.role}) does not have permission to access this route.
+        </p>
+      </div>
+    );
+  }
+  if (user.role === 'STUDENT' && requiredFeature && !featureControls[requiredFeature]) {
+    return (
+      <div className="glass-card rounded-2xl p-6 max-w-lg mx-auto mt-10 text-center space-y-3">
+        <h2 className="font-display text-xl font-bold text-amber-400">Disabled by College Administration</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-300">
+          This portal module is currently turned off in Admin Command Feature Access Control.
         </p>
       </div>
     );
@@ -88,7 +100,7 @@ export function App() {
                   <Route
                     path="/simulator"
                     element={
-                      <ProtectedRoute allowedRoles={['STUDENT']}>
+                      <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowBunkSimulator">
                         <SimulatorPage />
                       </ProtectedRoute>
                     }
@@ -112,7 +124,7 @@ export function App() {
                   <Route
                     path="/heroes"
                     element={
-                      <ProtectedRoute allowedRoles={['STUDENT']}>
+                      <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowHeroGamification">
                         <HeroesPage />
                       </ProtectedRoute>
                     }
@@ -120,7 +132,7 @@ export function App() {
                   <Route
                     path="/armory"
                     element={
-                      <ProtectedRoute allowedRoles={['STUDENT']}>
+                      <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowHeroGamification">
                         <ArmoryPage />
                       </ProtectedRoute>
                     }
@@ -128,7 +140,7 @@ export function App() {
                   <Route
                     path="/squad"
                     element={
-                      <ProtectedRoute allowedRoles={['STUDENT']}>
+                      <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowSquadConnect">
                         <SquadPage />
                       </ProtectedRoute>
                     }
@@ -145,7 +157,7 @@ export function App() {
                   <Route
                     path="/od"
                     element={
-                      <ProtectedRoute allowedRoles={['STUDENT']}>
+                      <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowODRequests">
                         <ODPage />
                       </ProtectedRoute>
                     }

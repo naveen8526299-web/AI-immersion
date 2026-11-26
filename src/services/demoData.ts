@@ -6,6 +6,7 @@ import {
   AuditLogEntry,
   DemoStudentRecord,
   FacultyAnnouncement,
+  FeatureControlFlags,
   ODRequest,
   RewardTransaction,
   SemesterSettings,
@@ -662,6 +663,15 @@ export const INITIAL_DEMO_COHORT: DemoStudentRecord[] = [
     ],
   },
 ];
+
+export const DEFAULT_FEATURE_CONTROLS: FeatureControlFlags = {
+  studentSelfAttendanceLocked: true, // Official College ERP lock: students cannot alter attendance
+  allowStudentSubjectManagement: false,
+  allowBunkSimulator: true,
+  allowSquadConnect: true,
+  allowODRequests: true,
+  allowHeroGamification: true,
+};
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   soundEnabled: true,

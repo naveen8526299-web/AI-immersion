@@ -8,7 +8,7 @@ import {
 } from '../src/utils/attendanceMath';
 import { computeSquadPrivacyTier, hasClaimedReward } from '../src/utils/gamification';
 import { buildRecoveryPlans, countWorkingDaysBetween, predictHallTicketSurvival } from '../src/utils/survivalPredictor';
-import { INITIAL_SEMESTER, INITIAL_SUBJECTS } from '../src/services/demoData';
+import { DEFAULT_FEATURE_CONTROLS, INITIAL_SEMESTER, INITIAL_SUBJECTS } from '../src/services/demoData';
 import { RewardTransaction } from '../src/types';
 
 describe('AttendanceGuard Exact Integer Mathematical Engine', () => {
@@ -113,6 +113,15 @@ describe('Gamification Deduplication & Squad Privacy', () => {
     const { workingDays, dates } = countWorkingDaysBetween('2026-11-26', '2026-11-27', [1, 2, 3, 4, 5], []);
     expect(workingDays).toBe(2);
     expect(dates).toEqual(['2026-11-26', '2026-11-27']);
+  });
+
+  it('Enforces strict college ERP defaults in DEFAULT_FEATURE_CONTROLS', () => {
+    expect(DEFAULT_FEATURE_CONTROLS.studentSelfAttendanceLocked).toBe(true);
+    expect(DEFAULT_FEATURE_CONTROLS.allowStudentSubjectManagement).toBe(false);
+    expect(DEFAULT_FEATURE_CONTROLS.allowBunkSimulator).toBe(true);
+    expect(DEFAULT_FEATURE_CONTROLS.allowODRequests).toBe(true);
+    expect(DEFAULT_FEATURE_CONTROLS.allowSquadConnect).toBe(true);
+    expect(DEFAULT_FEATURE_CONTROLS.allowHeroGamification).toBe(true);
   });
 
   it('Builds MA501 recovery plan on /recovery starting today and matching scheduled timetable days', () => {

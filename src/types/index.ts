@@ -240,6 +240,15 @@ export interface DemoStudentRecord {
   subjects: Subject[];
 }
 
+export interface FeatureControlFlags {
+  studentSelfAttendanceLocked: boolean;
+  allowStudentSubjectManagement: boolean;
+  allowBunkSimulator: boolean;
+  allowSquadConnect: boolean;
+  allowODRequests: boolean;
+  allowHeroGamification: boolean;
+}
+
 export interface AppPreferences {
   soundEnabled: boolean;
   soundVolume: number; // 0..1

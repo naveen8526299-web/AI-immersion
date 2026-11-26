@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  DEFAULT_FEATURE_CONTROLS,
   DEFAULT_PREFERENCES,
   INITIAL_ACHIEVEMENTS,
   INITIAL_ANNOUNCEMENTS,
@@ -23,6 +24,7 @@ import {
   AuditLogEntry,
   DemoStudentRecord,
   FacultyAnnouncement,
+  FeatureControlFlags,
   HeroId,
   HeroMood,
   ODEventType,
@@ -67,6 +69,7 @@ interface PersistedState {
   thanosAlerts: ThanosAlertRecord[];
   demoCohort: DemoStudentRecord[];
   preferences: AppPreferences;
+  featureControls: FeatureControlFlags;
 }
 
 function loadInitialState(): PersistedState {
@@ -89,6 +92,9 @@ function loadInitialState(): PersistedState {
         thanosAlerts: parsed.thanosAlerts ?? INITIAL_THANOS_ALERTS,
         demoCohort: parsed.demoCohort ?? INITIAL_DEMO_COHORT,
         preferences: parsed.preferences ? { ...DEFAULT_PREFERENCES, ...parsed.preferences } : DEFAULT_PREFERENCES,
+        featureControls: parsed.featureControls
+          ? { ...DEFAULT_FEATURE_CONTROLS, ...parsed.featureControls }
+          : DEFAULT_FEATURE_CONTROLS,
       };
     }
   } catch {
@@ -110,6 +116,7 @@ function loadInitialState(): PersistedState {
     thanosAlerts: INITIAL_THANOS_ALERTS,
     demoCohort: INITIAL_DEMO_COHORT,
     preferences: DEFAULT_PREFERENCES,
+    featureControls: DEFAULT_FEATURE_CONTROLS,
   };
 }
 
@@ -187,6 +194,20 @@ interface AppStateContextValue extends PersistedState {
   dismissNotification: (id: string) => void;
   triggerDailyReminder: (force?: boolean) => void;
   requestBrowserNotificationPermission: () => Promise<NotificationPermission | 'unsupported'>;
+  updateFeatureControls: (updates: Partial<FeatureControlFlags>) => { ok: boolean; error?: string };
+  adminAddStudent: (payload: {
+    fullName: string;
+    registerNumber: string;
+    department: string;
+    semesterNumber: number;
+    heroAlias?: string;
+  }) => { ok: boolean; error?: string };
+  adminBroadcastNotification: (payload: {
+    target: 'ALL' | 'AT_RISK';
+    category: AppNotification['category'];
+    title: string;
+    message: string;
+  }) => { ok: boolean; error?: string };
   updatePreferences: (updates: Partial<AppPreferences>) => void;
   resetDemoState: () => void;
 }
@@ -348,6 +369,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const recordStudentAttendance = (subjectId: string, status: 'PRESENT' | 'ABSENT', note?: string) => {
     const target = state.subjects.find((s) => s.id === subjectId);
     if (!target || !user) return;
+    if (user.role === 'STUDENT' && state.featureControls.studentSelfAttendanceLocked) {
+      showToast('Official attendance is locked by College Admin. Contact Faculty or submit an OD.', 'info');
+      return;
+    }
 
     const prevEval = evaluateAttendance(target.attended, target.total, target.minPercentage);
     const nextAttended = status === 'PRESENT' ? target.attended + 1 : target.attended;
@@ -514,6 +539,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const addSubject = (subj: Omit<Subject, 'id' | 'studentId'>) => {
+    if (user?.role === 'STUDENT' && !state.featureControls.allowStudentSubjectManagement) {
+      showToast('Subject editing is managed by College Administration.', 'info');
+      return;
+    }
     const newSubj: Subject = {
       ...subj,
       id: `subj-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -526,6 +555,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const updateSubject = (id: string, updates: Partial<Subject>) => {
+    if (user?.role === 'STUDENT' && !state.featureControls.allowStudentSubjectManagement) {
+      showToast('Subject editing is managed by College Administration.', 'info');
+      return;
+    }
     setState((prev) => ({
       ...prev,
       subjects: prev.subjects.map((s) => (s.id === id ? { ...s, ...updates } : s)),
@@ -533,6 +566,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteSubject = (id: string) => {
+    if (user?.role === 'STUDENT' && !state.featureControls.allowStudentSubjectManagement) {
+      showToast('Subject deletion is restricted by College Administration.', 'info');
+      return;
+    }
     setState((prev) => ({
       ...prev,
       subjects: prev.subjects.filter((s) => s.id !== id),
@@ -777,15 +814,45 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const nextNotifications = [...state.notifications];
     const eligibleAfter = isAttendanceEligible(payload.newAttended, payload.newTotal, targetSubject.minPercentage);
-    if (!eligibleAfter && isDemoMainStudent) {
+    if (isDemoMainStudent) {
       nextNotifications.unshift({
         id: `notif-fac-${Date.now()}`,
-        title: `Faculty Update Alert: ${targetSubject.code}`,
-        message: `${user.fullName} updated ${targetSubject.code} to ${payload.newAttended}/${payload.newTotal}. Subject is now below ${targetSubject.minPercentage}%.`,
-        category: 'WARNING',
+        title: !eligibleAfter
+          ? `Risk Alert (${user.role}): ${targetSubject.code}`
+          : `Official Attendance Updated: ${targetSubject.code}`,
+        message: !eligibleAfter
+          ? `${user.fullName} updated ${targetSubject.code} to ${payload.newAttended}/${payload.newTotal}. Subject is below ${targetSubject.minPercentage}%!`
+          : `${user.fullName} updated ${targetSubject.code} to ${payload.newAttended}/${payload.newTotal} (${payload.reason.trim()}).`,
+        category: !eligibleAfter ? 'WARNING' : 'ANNOUNCEMENT',
+        imageUrl: !eligibleAfter ? 'assets/characters/thanos-admin.jpg' : 'assets/characters/iron-scholar.jpg',
         read: false,
         createdAt: nowIso,
       });
+    }
+
+    // Verified Present attendance by Faculty/Admin grants student coins/XP (with deduplication)
+    let nextRewards = state.rewards;
+    if (isDemoMainStudent && payload.newAttended > prevAtt && payload.newTotal >= prevTot) {
+      const gainedClasses = payload.newAttended - prevAtt;
+      const is100Now = payload.newTotal > 0 && payload.newAttended === payload.newTotal;
+      const coinsEarned =
+        gainedClasses * (REWARD_RULES.ATTEND_CLASS_COINS + (is100Now ? REWARD_RULES.SHIELD_100_BONUS_COINS : 0));
+      const xpEarned = gainedClasses * REWARD_RULES.ATTEND_CLASS_XP;
+      const eventKey = `verified-${audit.id}`;
+      if (!hasClaimedReward(nextRewards, eventKey)) {
+        nextRewards = [
+          {
+            id: `rew-${Date.now()}`,
+            eventKey,
+            description: `Verified ${user.role} Attendance: ${targetSubject.code}`,
+            coinsDelta: coinsEarned,
+            xpDelta: xpEarned,
+            source: is100Now ? 'SHIELD_BONUS' : 'ATTENDANCE',
+            createdAt: nowIso,
+          },
+          ...nextRewards,
+        ];
+      }
     }
 
     setState((prev) => ({
@@ -815,8 +882,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               subjectId: targetSubject.id,
               subjectCode: targetSubject.code,
               subjectName: targetSubject.name,
-              date: nowIso.slice(0, 10),
-              status: payload.newAttended >= prevAtt ? 'PRESENT' : 'ABSENT',
+              date: toLocalDateIso(),
+              status: payload.newAttended > prevAtt ? 'PRESENT' : 'ABSENT',
               periods: Math.max(1, Math.abs(payload.newTotal - prevTot)),
               source: user.role === 'ADMIN' ? 'ADMIN_CORRECTION' : 'FACULTY_VERIFIED',
               note: payload.reason.trim(),
@@ -830,6 +897,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             ...prev.records,
           ]
         : prev.records,
+      rewards: nextRewards,
       auditLogs: [audit, ...prev.auditLogs],
       notifications: nextNotifications,
     }));
@@ -1114,6 +1182,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const undoAttendanceRecord = (recordId: string) => {
+    if (user?.role === 'STUDENT' && state.featureControls.studentSelfAttendanceLocked) {
+      return { ok: false, error: 'Official attendance records are locked by College Administration.' };
+    }
     const rec = state.records.find((r) => r.id === recordId);
     if (!rec) return { ok: false, error: 'Record not found.' };
     if (rec.source !== 'STUDENT_SELF') {
@@ -1372,6 +1443,162 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     triggerDailyReminder,
   ]);
 
+  const updateFeatureControls = (updates: Partial<FeatureControlFlags>) => {
+    if (!user || user.role !== 'ADMIN') {
+      return { ok: false, error: 'Only College Administrators can change platform feature controls.' };
+    }
+    const nextControls = { ...state.featureControls, ...updates };
+    const nowIso = new Date().toISOString();
+    const audit: AuditLogEntry = {
+      id: `aud-ctrl-${Date.now()}`,
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'ADMIN_FEATURE_CONTROL_UPDATE',
+      targetType: 'SETTINGS',
+      targetId: 'featureControls',
+      previousValue: JSON.stringify(state.featureControls),
+      newValue: JSON.stringify(nextControls),
+      reason: 'Institutional feature control updated',
+      createdAt: nowIso,
+    };
+    setState((prev) => ({
+      ...prev,
+      featureControls: nextControls,
+      auditLogs: [audit, ...prev.auditLogs],
+    }));
+    showToast('Institutional feature controls updated!', 'success');
+    return { ok: true };
+  };
+
+  const adminAddStudent = (payload: {
+    fullName: string;
+    registerNumber: string;
+    department: string;
+    semesterNumber: number;
+    heroAlias?: string;
+  }) => {
+    if (!user || user.role !== 'ADMIN') {
+      return { ok: false, error: 'Only College Administrators can enroll students.' };
+    }
+    if (!payload.fullName.trim() || !payload.registerNumber.trim()) {
+      return { ok: false, error: 'Student full name and register number are required.' };
+    }
+    const newId = `demo-student-${Date.now()}`;
+    const regClean = payload.registerNumber.trim().toUpperCase();
+    const enrolledSubjects: Subject[] = state.subjects.map((s, idx) => ({
+      ...s,
+      id: `${newId}-s${idx + 1}`,
+      studentId: newId,
+      attended: 0,
+      total: 0,
+    }));
+    const newStudent: DemoStudentRecord = {
+      id: newId,
+      fullName: payload.fullName.trim(),
+      heroAlias: payload.heroAlias?.trim() || `Guard-${regClean.slice(-3)}`,
+      registerNumber: regClean,
+      department: payload.department.trim() || 'CSE',
+      semesterNumber: payload.semesterNumber || 5,
+      subjects: enrolledSubjects,
+    };
+    const audit: AuditLogEntry = {
+      id: `aud-stu-${Date.now()}`,
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'ADMIN_ENROLL_STUDENT',
+      targetType: 'AUTH',
+      targetId: regClean,
+      newValue: `${newStudent.fullName} (${regClean})`,
+      reason: 'New student enrolled by College Admin',
+      createdAt: new Date().toISOString(),
+    };
+    setState((prev) => ({
+      ...prev,
+      demoCohort: [newStudent, ...prev.demoCohort],
+      auditLogs: [audit, ...prev.auditLogs],
+    }));
+    showToast(`Enrolled ${newStudent.fullName} (${regClean}) across ${enrolledSubjects.length} subjects!`, 'success');
+    return { ok: true };
+  };
+
+  const adminBroadcastNotification = (payload: {
+    target: 'ALL' | 'AT_RISK';
+    category: AppNotification['category'];
+    title: string;
+    message: string;
+  }) => {
+    if (!user || user.role !== 'ADMIN') {
+      return { ok: false, error: 'Only College Administrators can broadcast official notifications.' };
+    }
+    if (!payload.title.trim() || !payload.message.trim()) {
+      return { ok: false, error: 'Notification title and message are required.' };
+    }
+    const nowIso = new Date().toISOString();
+    const imgPath =
+      payload.category === 'WARNING' || payload.category === 'RECOVERY'
+        ? 'assets/characters/thanos-admin.jpg'
+        : payload.category === 'EXAM'
+        ? 'assets/characters/doctor-deadline.jpg'
+        : 'assets/characters/captain-campus.jpg';
+
+    const notif: AppNotification = {
+      id: `notif-adm-${Date.now()}`,
+      title: `[${payload.target === 'AT_RISK' ? 'AT-RISK ALERT' : 'COLLEGE NOTICE'}] ${payload.title.trim()}`,
+      message: payload.message.trim(),
+      category: payload.category,
+      imageUrl: imgPath,
+      read: false,
+      createdAt: nowIso,
+    };
+
+    const ann: FacultyAnnouncement = {
+      id: `ann-adm-${Date.now()}`,
+      authorName: `${user.fullName} (Admin)`,
+      subjectCode: payload.target === 'AT_RISK' ? 'AT-RISK (<75%)' : 'ALL',
+      title: payload.title.trim(),
+      message: payload.message.trim(),
+      createdAt: nowIso,
+    };
+
+    const audit: AuditLogEntry = {
+      id: `aud-notif-${Date.now()}`,
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: 'ADMIN_BROADCAST_NOTIFICATION',
+      targetType: 'SETTINGS',
+      targetId: payload.target,
+      newValue: payload.title.trim(),
+      reason: `Sent ${payload.category} alert to ${payload.target}`,
+      createdAt: nowIso,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      notifications: [notif, ...prev.notifications],
+      announcements: [ann, ...prev.announcements],
+      auditLogs: [audit, ...prev.auditLogs],
+    }));
+
+    if (
+      state.preferences.browserNotificationsEnabled &&
+      typeof window !== 'undefined' &&
+      'Notification' in window &&
+      Notification.permission === 'granted'
+    ) {
+      try {
+        new Notification(notif.title, { body: notif.message, icon: assetUrl(imgPath) });
+      } catch {
+        // ignore
+      }
+    }
+
+    showToast(`Official notification dispatched to ${payload.target === 'AT_RISK' ? 'At-Risk Students' : 'All Students'}!`, 'success');
+    return { ok: true };
+  };
+
   const resetDemoState = () => {
     localStorage.removeItem(STATE_KEY);
     localStorage.removeItem('ag_demo_student_profile_v1');
@@ -1391,6 +1618,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       thanosAlerts: INITIAL_THANOS_ALERTS,
       demoCohort: INITIAL_DEMO_COHORT,
       preferences: DEFAULT_PREFERENCES,
+      featureControls: DEFAULT_FEATURE_CONTROLS,
     });
   };
 
@@ -1446,6 +1674,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         dismissNotification,
         triggerDailyReminder,
         requestBrowserNotificationPermission,
+        updateFeatureControls,
+        adminAddStudent,
+        adminBroadcastNotification,
         updatePreferences,
         resetDemoState,
       }}

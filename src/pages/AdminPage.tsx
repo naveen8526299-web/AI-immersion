@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  BellRing,
   Building2,
   ChevronRight,
   Download,
@@ -8,22 +9,59 @@ import {
   FileText,
   Info,
   KeyRound,
+  Lock,
+  Megaphone,
+  Plus,
   Search,
   ShieldCheck,
   Sliders,
+  ToggleLeft,
+  ToggleRight,
+  Unlock,
+  UserPlus,
   X,
 } from 'lucide-react';
 import { useAppState } from '../contexts/AppStateContext';
 import { useAuth } from '../contexts/AuthContext';
+import { AppNotification, FeatureControlFlags } from '../types';
 import { evaluateAttendance, evaluateOverallSubjects } from '../utils/attendanceMath';
 
 export const AdminPage: React.FC = () => {
   const { user } = useAuth();
-  const { subjects, demoCohort, odRequests, auditLogs, semester, updateSemester, reviewODRequest } = useAppState();
+  const {
+    subjects,
+    demoCohort,
+    odRequests,
+    auditLogs,
+    semester,
+    featureControls,
+    updateSemester,
+    updateFeatureControls,
+    adminAddStudent,
+    adminBroadcastNotification,
+    facultyUpdateStudentAttendance,
+    reviewODRequest,
+  } = useAppState();
 
   const [search, setSearch] = useState('');
   const [anonymizeView, setAnonymizeView] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [dossierReason, setDossierReason] = useState('Official Admin roll-call update');
+
+  // Enroll Student form state
+  const [enrollName, setEnrollName] = useState('');
+  const [enrollReg, setEnrollReg] = useState('');
+  const [enrollDept, setEnrollDept] = useState('CSE (CoE AI)');
+  const [enrollSem, setEnrollSem] = useState(5);
+  const [enrollAlias, setEnrollAlias] = useState('');
+  const [enrollFeedback, setEnrollFeedback] = useState<string | null>(null);
+
+  // Official Notification Broadcast state
+  const [notifTarget, setNotifTarget] = useState<'ALL' | 'AT_RISK'>('ALL');
+  const [notifCategory, setNotifCategory] = useState<AppNotification['category']>('ANNOUNCEMENT');
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMessage, setNotifMessage] = useState('');
+  const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
   const allStudents = useMemo(
     () => [
@@ -57,6 +95,81 @@ export const AdminPage: React.FC = () => {
   );
 
   if (!user || user.role !== 'ADMIN') return null;
+
+  const handleEnrollStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = adminAddStudent({
+      fullName: enrollName,
+      registerNumber: enrollReg,
+      department: enrollDept,
+      semesterNumber: enrollSem,
+      heroAlias: enrollAlias,
+    });
+    if (!res.ok) {
+      setEnrollFeedback(res.error || 'Could not enroll student.');
+      return;
+    }
+    setEnrollFeedback(`Enrolled ${enrollName.trim()} (${enrollReg.trim().toUpperCase()}) into college directory.`);
+    setEnrollName('');
+    setEnrollReg('');
+    setEnrollAlias('');
+  };
+
+  const handleBroadcastNotification = (e: React.FormEvent) => {
+    e.preventDefault();
+    const res = adminBroadcastNotification({
+      target: notifTarget,
+      category: notifCategory,
+      title: notifTitle,
+      message: notifMessage,
+    });
+    if (!res.ok) {
+      setNotifFeedback(res.error || 'Could not dispatch notification.');
+      return;
+    }
+    setNotifFeedback(`Official circular sent to ${notifTarget === 'ALL' ? 'all enrolled students' : 'at-risk students (<75%)'}.`);
+    setNotifTitle('');
+    setNotifMessage('');
+  };
+
+  const featureToggleRows: Array<{
+    key: keyof FeatureControlFlags;
+    label: string;
+    desc: string;
+    invertedDanger?: boolean;
+  }> = [
+    {
+      key: 'studentSelfAttendanceLocked',
+      label: 'Lock Student Self-Attendance Editing',
+      desc: 'Recommended for official ERP mode: only Faculty and Admin can mark or edit student attendance.',
+      invertedDanger: true,
+    },
+    {
+      key: 'allowStudentSubjectManagement',
+      label: 'Allow Student Subject Add / Edit / Delete',
+      desc: 'When OFF, college curriculum subjects are fixed by Administration.',
+    },
+    {
+      key: 'allowBunkSimulator',
+      label: 'Enable Bunk & Survival Simulator',
+      desc: 'Allows students to run non-destructive What-If scenarios without altering official counts.',
+    },
+    {
+      key: 'allowODRequests',
+      label: 'Enable Student OD / Leave Requests',
+      desc: 'Allows students to submit On-Duty claims for Faculty/Admin verification.',
+    },
+    {
+      key: 'allowSquadConnect',
+      label: 'Enable Squad Connect',
+      desc: 'Privacy-safe peer accountability module for students.',
+    },
+    {
+      key: 'allowHeroGamification',
+      label: 'Enable Hero Companions, Armory & XP',
+      desc: 'Controls cosmic mascot companions, badges, and reward shop visibility.',
+    },
+  ];
 
   const exportInstitutionalReport = () => {
     const header = 'RegisterNo,Alias,OverallPct,SafeSubjects,AtRiskSubjects\n';
@@ -98,6 +211,193 @@ export const AdminPage: React.FC = () => {
           Simulated Institutional Mode: Demonstrates college-wide eligibility reporting, rule configuration, OD
           governance, and immutable audit logs. Live ERP synchronization requires authorized college API / Supabase deployment.
         </span>
+      </div>
+
+      {/* Website Feature Access Control */}
+      <div className="glass-card rounded-2xl p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="font-display text-lg font-bold flex items-center gap-2">
+              {featureControls.studentSelfAttendanceLocked ? (
+                <Lock className="h-4 w-4 text-emerald-400" />
+              ) : (
+                <Unlock className="h-4 w-4 text-amber-400" />
+              )}
+              Website Feature Access Control (Admin Only)
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Control student permissions across the college portal in real time. Every change is logged to the audit trail.
+            </p>
+          </div>
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold self-start ${
+              featureControls.studentSelfAttendanceLocked
+                ? 'bg-emerald-500/15 border border-emerald-400/35 text-emerald-500 dark:text-emerald-300'
+                : 'bg-amber-500/15 border border-amber-400/35 text-amber-500 dark:text-amber-300'
+            }`}
+          >
+            {featureControls.studentSelfAttendanceLocked ? 'Strict ERP Lock Active' : 'Student Self-Edit Open'}
+          </span>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-3 text-xs">
+          {featureToggleRows.map((item) => {
+            const active = featureControls[item.key];
+            return (
+              <div
+                key={item.key}
+                className="flex items-center justify-between gap-3 rounded-xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/70 dark:border-white/10 p-3.5"
+              >
+                <div>
+                  <div className="font-bold text-slate-800 dark:text-white">{item.label}</div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">{item.desc}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateFeatureControls({ [item.key]: !active })}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 font-bold shrink-0 transition ${
+                    active
+                      ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-600 dark:text-emerald-300'
+                      : 'bg-slate-200 dark:bg-white/10 border border-slate-300 dark:border-white/15 text-slate-500 dark:text-slate-300'
+                  }`}
+                >
+                  {active ? <ToggleRight className="h-4 w-4" /> : <ToggleLeft className="h-4 w-4" />}
+                  {active ? 'ON' : 'OFF'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Enroll New Student + Official Notification Broadcast */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <form onSubmit={handleEnrollStudent} className="glass-card rounded-2xl p-5 space-y-4">
+          <h2 className="font-display text-lg font-bold flex items-center gap-2">
+            <UserPlus className="h-4 w-4 text-[#00D9FF]" /> Enroll Student into College Registry
+          </h2>
+          <div className="grid sm:grid-cols-2 gap-3 text-xs">
+            <div>
+              <label className="block font-semibold mb-1">Student Full Name</label>
+              <input
+                required
+                value={enrollName}
+                onChange={(e) => setEnrollName(e.target.value)}
+                placeholder="e.g. Kavya Sundaram"
+                className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Register Number</label>
+              <input
+                required
+                value={enrollReg}
+                onChange={(e) => setEnrollReg(e.target.value)}
+                placeholder="e.g. 22CSE118"
+                className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2 font-mono uppercase"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Department</label>
+              <input
+                required
+                value={enrollDept}
+                onChange={(e) => setEnrollDept(e.target.value)}
+                className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Semester & Optional Alias</label>
+              <div className="grid grid-cols-3 gap-2">
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={enrollSem}
+                  onChange={(e) => setEnrollSem(Math.max(1, Math.min(8, Number(e.target.value))))}
+                  className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-2.5 py-2 font-mono font-bold"
+                />
+                <input
+                  value={enrollAlias}
+                  onChange={(e) => setEnrollAlias(e.target.value)}
+                  placeholder="Alias"
+                  className="col-span-2 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-2.5 py-2"
+                />
+              </div>
+            </div>
+          </div>
+          {enrollFeedback && (
+            <div className="rounded-xl bg-cyan-500/10 border border-cyan-400/30 px-3 py-2 text-xs text-cyan-600 dark:text-cyan-300">
+              {enrollFeedback}
+            </div>
+          )}
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#00D9FF] to-[#1677FF] px-4 py-2.5 text-xs font-extrabold text-slate-950 hover:brightness-110 transition"
+          >
+            <Plus className="h-4 w-4" /> Add Student & Assign Subjects
+          </button>
+        </form>
+
+        <form onSubmit={handleBroadcastNotification} className="glass-card rounded-2xl p-5 space-y-4">
+          <h2 className="font-display text-lg font-bold flex items-center gap-2">
+            <Megaphone className="h-4 w-4 text-[#FFC857]" /> Official College Notification Broadcast
+          </h2>
+          <div className="grid sm:grid-cols-2 gap-3 text-xs">
+            <div>
+              <label className="block font-semibold mb-1">Target Audience</label>
+              <select
+                value={notifTarget}
+                onChange={(e) => setNotifTarget(e.target.value as 'ALL' | 'AT_RISK')}
+                className="w-full rounded-xl bg-slate-100 dark:bg-[#17152D] border border-slate-300 dark:border-white/15 px-3 py-2 font-semibold"
+              >
+                <option value="ALL">All Enrolled Students</option>
+                <option value="AT_RISK">At-Risk Students (&lt; 75% Attendance)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Notice Category</label>
+              <select
+                value={notifCategory}
+                onChange={(e) => setNotifCategory(e.target.value as AppNotification['category'])}
+                className="w-full rounded-xl bg-slate-100 dark:bg-[#17152D] border border-slate-300 dark:border-white/15 px-3 py-2 font-semibold"
+              >
+                <option value="ANNOUNCEMENT">Official College Circular</option>
+                <option value="WARNING">Thanos Detention Warning</option>
+                <option value="EXAM">Exam / Hall Ticket Notice</option>
+                <option value="RECOVERY">Mandatory Recovery Notice</option>
+              </select>
+            </div>
+          </div>
+          <div className="space-y-2.5 text-xs">
+            <input
+              required
+              value={notifTitle}
+              onChange={(e) => setNotifTitle(e.target.value)}
+              placeholder="Circular Title (e.g. End-Semester Hall Ticket Cut-off Notice)"
+              className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <textarea
+              required
+              rows={2}
+              value={notifMessage}
+              onChange={(e) => setNotifMessage(e.target.value)}
+              placeholder="Official message delivered to Student Notification Center..."
+              className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+          </div>
+          {notifFeedback && (
+            <div className="rounded-xl bg-amber-500/10 border border-amber-400/30 px-3 py-2 text-xs text-amber-600 dark:text-amber-300">
+              {notifFeedback}
+            </div>
+          )}
+          <button
+            type="submit"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#8138F5] to-[#1677FF] px-4 py-2.5 text-xs font-extrabold text-white hover:brightness-110 transition"
+          >
+            <BellRing className="h-4 w-4" /> Send College Notification
+          </button>
+        </form>
       </div>
 
       {/* Institutional Rules Configuration */}
@@ -321,6 +621,18 @@ ON CONFLICT (id) DO UPDATE SET role = 'ADMIN';`}
               </button>
             </div>
 
+            <div className="rounded-xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/70 dark:border-white/10 px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <span className="font-semibold text-slate-600 dark:text-slate-300">
+                Admin Direct Attendance Override Reason:
+              </span>
+              <input
+                value={dossierReason}
+                onChange={(e) => setDossierReason(e.target.value)}
+                placeholder="Reason logged to student ledger..."
+                className="sm:w-72 rounded-lg bg-white dark:bg-[#080817] border border-slate-300 dark:border-white/15 px-2.5 py-1 text-xs"
+              />
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead>
@@ -330,7 +642,8 @@ ON CONFLICT (id) DO UPDATE SET role = 'ADMIN';`}
                     <th className="py-2 pr-3">Attended / Total</th>
                     <th className="py-2 pr-3">Exact %</th>
                     <th className="py-2 pr-3">Status</th>
-                    <th className="py-2">Margin / Recovery</th>
+                    <th className="py-2 pr-3">Margin / Recovery</th>
+                    <th className="py-2">Admin Attendance</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200/70 dark:divide-white/5">
@@ -356,10 +669,44 @@ ON CONFLICT (id) DO UPDATE SET role = 'ADMIN';`}
                             {ev.statusLabel}
                           </span>
                         </td>
-                        <td className="py-2.5 text-slate-500 dark:text-slate-300">
+                        <td className="py-2.5 pr-3 text-slate-500 dark:text-slate-300">
                           {ev.isEligible
                             ? `${ev.maxSafeAbsences} safe skip(s)`
                             : `Attend ${ev.requiredRecoveryClasses} straight`}
+                        </td>
+                        <td className="py-2.5">
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                facultyUpdateStudentAttendance({
+                                  studentId: selectedStudent.id,
+                                  subjectId: subj.id,
+                                  newAttended: subj.attended + 1,
+                                  newTotal: subj.total + 1,
+                                  reason: dossierReason.trim() || 'Admin roll call: Present',
+                                })
+                              }
+                              className="rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/35 px-2 py-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-300 transition"
+                            >
+                              +Present
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                facultyUpdateStudentAttendance({
+                                  studentId: selectedStudent.id,
+                                  subjectId: subj.id,
+                                  newAttended: subj.attended,
+                                  newTotal: subj.total + 1,
+                                  reason: dossierReason.trim() || 'Admin roll call: Absent',
+                                })
+                              }
+                              className="rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 px-2 py-1 text-[11px] font-bold text-rose-600 dark:text-rose-300 transition"
+                            >
+                              +Absent
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

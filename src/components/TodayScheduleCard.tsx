@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
-import { CalendarCheck, CheckCircle2, Clock, RotateCcw, Settings2, XCircle } from 'lucide-react';
+import { CalendarCheck, CheckCircle2, Clock, Lock, RotateCcw, Settings2, XCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAppState } from '../contexts/AppStateContext';
 import { evaluateAttendance } from '../utils/attendanceMath';
 import { toLocalDateIso } from '../utils/dateUtils';
 
 export const TodayScheduleCard: React.FC = () => {
-  const { subjects, records, semester, recordStudentAttendance, undoAttendanceRecord } = useAppState();
+  const { subjects, records, semester, featureControls, recordStudentAttendance, undoAttendanceRecord } = useAppState();
   const [confirmingPeriodIdx, setConfirmingPeriodIdx] = useState<number | null>(null);
+  const isLocked = featureControls.studentSelfAttendanceLocked;
 
   const now = new Date();
   const todayIso = toLocalDateIso(now);
@@ -32,7 +33,9 @@ export const TodayScheduleCard: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Tap once as you attend each period in college. Duplicate period logs are prevented automatically.
+            {isLocked
+              ? 'Official college roll call mode: Faculty & Admin mark attendance. Track period status or plan ahead.'
+              : 'Tap once as you attend each period in college. Duplicate period logs are prevented automatically.'}
           </p>
         </div>
 
@@ -40,7 +43,7 @@ export const TodayScheduleCard: React.FC = () => {
           to="/semester"
           className="inline-flex items-center gap-1.5 rounded-xl bg-slate-200/80 dark:bg-white/10 px-3.5 py-2 text-xs font-bold hover:bg-slate-300/70 dark:hover:bg-white/20 transition self-start"
         >
-          <Settings2 className="h-3.5 w-3.5 text-cyan-400" /> Edit Timetable
+          <Settings2 className="h-3.5 w-3.5 text-cyan-400" /> {isLocked ? 'View Timetable' : 'Edit Timetable'}
         </Link>
       </div>
 
@@ -115,7 +118,37 @@ export const TodayScheduleCard: React.FC = () => {
                   </div>
                 </div>
 
-                {loggedRec ? (
+                {isLocked ? (
+                  <div className="flex items-center justify-between gap-2 pt-1">
+                    {loggedRec ? (
+                      <span
+                        className={`inline-flex items-center gap-1 text-[11px] font-bold ${
+                          loggedRec.status === 'PRESENT' ? 'text-emerald-400' : 'text-rose-400'
+                        }`}
+                      >
+                        {loggedRec.status === 'PRESENT' ? (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        ) : (
+                          <XCircle className="h-3.5 w-3.5" />
+                        )}
+                        {loggedRec.status === 'PRESENT' ? 'Marked Present' : 'Marked Absent'}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                        <Lock className="h-3 w-3 text-[#00D9FF]" />
+                        Pending Faculty Roll Call
+                      </span>
+                    )}
+                    {featureControls.allowBunkSimulator && (
+                      <Link
+                        to="/simulator"
+                        className="rounded-lg bg-[#00D9FF]/15 border border-[#00D9FF]/30 px-2 py-0.5 text-[10px] font-bold text-[#00D9FF] hover:bg-[#00D9FF]/25 transition"
+                      >
+                        Simulate
+                      </Link>
+                    )}
+                  </div>
+                ) : loggedRec ? (
                   <div className="flex items-center justify-between gap-2 pt-1">
                     <span
                       className={`inline-flex items-center gap-1 text-xs font-bold ${

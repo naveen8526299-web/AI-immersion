@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, CheckCircle2, Edit3, MinusCircle, PlusCircle, Shield, Skull, Trash2 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Edit3, Lock, MinusCircle, PlusCircle, Shield, Skull, Trash2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useAppState } from '../contexts/AppStateContext';
 import { Subject } from '../types';
 import { evaluateAttendance } from '../utils/attendanceMath';
 import { assetUrl } from '../utils/assetUrl';
@@ -22,9 +24,12 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
   onDelete,
   compact = false,
 }) => {
+  const { featureControls } = useAppState();
   const [confirmAbsence, setConfirmAbsence] = useState(false);
   const evalRes = evaluateAttendance(subject.attended, subject.total, subject.minPercentage);
   const nextIfMiss = evaluateAttendance(subject.attended, subject.total + 1, subject.minPercentage);
+  const isLocked = featureControls.studentSelfAttendanceLocked;
+  const canManageSubjects = featureControls.allowStudentSubjectManagement;
 
   const badgeConfig = {
     AVENGERS_SHIELD: {
@@ -146,8 +151,55 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
         </div>
       </div>
 
-      {/* Confirmation Banner before recording real absence */}
-      {confirmAbsence ? (
+      {/* Official Lock Mode vs Self-Log Action Footer */}
+      {isLocked ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 rounded-xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/70 dark:border-white/10 px-3 py-2">
+          <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-600 dark:text-slate-300">
+            <Lock className="h-3.5 w-3.5 text-[#00D9FF]" />
+            Official College Record (Locked)
+          </span>
+          <div className="flex items-center gap-1.5">
+            {featureControls.allowBunkSimulator && (
+              <Link
+                to="/simulator"
+                className="rounded-lg bg-[#00D9FF]/15 border border-[#00D9FF]/35 px-2.5 py-1 text-[11px] font-bold text-cyan-700 dark:text-[#00D9FF] hover:bg-[#00D9FF]/25 transition"
+              >
+                Simulate
+              </Link>
+            )}
+            {featureControls.allowODRequests && (
+              <Link
+                to="/od"
+                className="rounded-lg bg-purple-500/15 border border-purple-400/35 px-2.5 py-1 text-[11px] font-bold text-purple-600 dark:text-purple-300 hover:bg-purple-500/25 transition"
+              >
+                Request OD
+              </Link>
+            )}
+            {canManageSubjects && (onEdit || onDelete) && (
+              <>
+                {onEdit && (
+                  <button
+                    onClick={() => onEdit(subject)}
+                    className="rounded-lg p-1.5 text-slate-500 hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-white/10 transition"
+                    title="Edit subject"
+                  >
+                    <Edit3 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    onClick={() => onDelete(subject)}
+                    className="rounded-lg p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-200/60 dark:hover:bg-white/10 transition"
+                    title="Delete subject"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ) : confirmAbsence ? (
         <div className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-xs">
           <div className="font-semibold text-amber-800 dark:text-amber-200 flex items-center gap-1.5">
             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
@@ -194,7 +246,7 @@ export const SubjectCard: React.FC<SubjectCardProps> = ({
             </button>
           </div>
 
-          {(onEdit || onDelete) && (
+          {canManageSubjects && (onEdit || onDelete) && (
             <div className="flex items-center gap-1">
               {onEdit && (
                 <button
