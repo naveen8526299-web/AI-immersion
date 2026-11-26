@@ -1,9 +1,23 @@
 import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, GraduationCap, Info, Megaphone, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  CalendarCheck,
+  CheckCircle2,
+  Eye,
+  GraduationCap,
+  Info,
+  Megaphone,
+  MinusCircle,
+  PlusCircle,
+  Search,
+  Users,
+  X,
+  XCircle,
+} from 'lucide-react';
 import { ThanosAdminArtwork } from '../components/HeroCharacters';
 import { useAppState } from '../contexts/AppStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { evaluateAttendance } from '../utils/attendanceMath';
+import { evaluateAttendance, evaluateOverallSubjects } from '../utils/attendanceMath';
 
 export const FacultyPage: React.FC = () => {
   const { user } = useAuth();
@@ -28,12 +42,11 @@ export const FacultyPage: React.FC = () => {
   } | null>(null);
   const [reason, setReason] = useState('');
   const [feedback, setFeedback] = useState<{ ok: boolean; text: string } | null>(null);
+  const [studentSearch, setStudentSearch] = useState('');
+  const [detailStudentId, setDetailStudentId] = useState<string | null>(null);
 
-  const [annSubject, setAnnSubject] = useState('MA501');
-  const [annTitle, setAnnTitle] = useState('');
-  const [annMsg, setAnnMsg] = useState('');
-
-  // Combine main demo student + demo cohort
+  // Roll Call ("Put Attendance") state
+  const assignedCodes = user?.role === 'ADMIN' ? null : user?.assignedSubjectCodes || [];
   const allStudents = useMemo(
     () => [
       {
@@ -41,6 +54,8 @@ export const FacultyPage: React.FC = () => {
         fullName: 'Arjun Karthik',
         heroAlias: 'CyberShield-07',
         registerNumber: '22CSE042',
+        department: 'CSE (CoE AI)',
+        semesterNumber: 5,
         subjects,
       },
       ...demoCohort,
@@ -48,16 +63,50 @@ export const FacultyPage: React.FC = () => {
     [subjects, demoCohort]
   );
 
+  const authorizedSubjectCodes = useMemo(() => {
+    const allCodes = Array.from(new Set(allStudents.flatMap((st) => st.subjects.map((s) => s.code))));
+    return assignedCodes ? allCodes.filter((c) => assignedCodes.includes(c)) : allCodes;
+  }, [allStudents, assignedCodes]);
+
+  const [rollCallCode, setRollCallCode] = useState<string>(authorizedSubjectCodes[0] || 'MA501');
+  const [sessionLabel, setSessionLabel] = useState<string>('Regular Lecture Period');
+
+  const [annSubject, setAnnSubject] = useState(authorizedSubjectCodes[0] || 'MA501');
+  const [annTitle, setAnnTitle] = useState('');
+  const [annMsg, setAnnMsg] = useState('');
+
   if (!user || (user.role !== 'FACULTY' && user.role !== 'ADMIN')) {
     return null;
   }
 
-  const assignedCodes = user.role === 'ADMIN' ? null : user.assignedSubjectCodes || [];
+  const activeRollCallCode = authorizedSubjectCodes.includes(rollCallCode)
+    ? rollCallCode
+    : authorizedSubjectCodes[0] || '';
 
-  // Filter student-subject rows strictly to faculty's assigned subjects
+  const rollCallRows = allStudents
+    .map((st) => {
+      const subj = st.subjects.find((s) => s.code === activeRollCallCode);
+      if (!subj) return null;
+      return {
+        student: st,
+        subject: subj,
+        evalRes: evaluateAttendance(subj.attended, subj.total, subj.minPercentage),
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => Boolean(x));
+
   const authorizedRows = allStudents.flatMap((st) =>
     st.subjects
       .filter((subj) => !assignedCodes || assignedCodes.includes(subj.code))
+      .filter((subj) => {
+        const q = studentSearch.trim().toLowerCase();
+        return (
+          !q ||
+          st.fullName.toLowerCase().includes(q) ||
+          st.registerNumber.toLowerCase().includes(q) ||
+          subj.code.toLowerCase().includes(q)
+        );
+      })
       .map((subj) => ({
         student: st,
         subject: subj,
@@ -65,7 +114,63 @@ export const FacultyPage: React.FC = () => {
       }))
   );
 
-  const atRiskRows = authorizedRows.filter((r) => !r.evalRes.isEligible);
+  const atRiskRows = allStudents.flatMap((st) =>
+    st.subjects
+      .filter((subj) => !assignedCodes || assignedCodes.includes(subj.code))
+      .map((subj) => ({
+        student: st,
+        subject: subj,
+        evalRes: evaluateAttendance(subj.attended, subj.total, subj.minPercentage),
+      }))
+      .filter((r) => !r.evalRes.isEligible)
+  );
+
+  const detailStudent = allStudents.find((st) => st.id === detailStudentId) || null;
+
+  const handleMarkSingle = (
+    studentId: string,
+    studentName: string,
+    subjectId: string,
+    subjectCode: string,
+    currentAttended: number,
+    currentTotal: number,
+    present: boolean
+  ) => {
+    const res = facultyUpdateStudentAttendance({
+      studentId,
+      subjectId,
+      newAttended: present ? currentAttended + 1 : currentAttended,
+      newTotal: currentTotal + 1,
+      reason: `${sessionLabel.trim() || 'Class Roll Call'} (${present ? 'Present' : 'Absent'})`,
+    });
+    if (!res.ok) {
+      setFeedback({ ok: false, text: res.error || 'Could not record attendance.' });
+      return;
+    }
+    setFeedback({
+      ok: true,
+      text: `Marked ${present ? 'PRESENT' : 'ABSENT'} for ${studentName} in ${subjectCode}. Student dashboard & audit log updated.`,
+    });
+  };
+
+  const handleMarkAllPresent = () => {
+    if (rollCallRows.length === 0) return;
+    let updated = 0;
+    rollCallRows.forEach(({ student, subject }) => {
+      const res = facultyUpdateStudentAttendance({
+        studentId: student.id,
+        subjectId: subject.id,
+        newAttended: subject.attended + 1,
+        newTotal: subject.total + 1,
+        reason: `${sessionLabel.trim() || 'Batch Roll Call'} (Present)`,
+      });
+      if (res.ok) updated += 1;
+    });
+    setFeedback({
+      ok: true,
+      text: `Batch Roll Call complete: Marked ${updated} student(s) PRESENT in ${activeRollCallCode}.`,
+    });
+  };
 
   const handleSaveAttendance = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,12 +217,12 @@ export const FacultyPage: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-500/15 border border-indigo-400/30 px-3 py-1 text-[11px] font-bold text-indigo-400">
-            <GraduationCap className="h-3.5 w-3.5" /> Faculty Verification & Risk Portal
+            <GraduationCap className="h-3.5 w-3.5" /> Faculty Verification & Attendance Control
           </span>
           <h1 className="mt-2 font-display text-2xl sm:text-3xl font-extrabold">Faculty Command Portal</h1>
           <p className="text-sm text-slate-600 dark:text-slate-300">
-            Authorized Subjects:{' '}
-            <strong className="font-mono text-cyan-400">
+            Signed in as <strong>{user.fullName}</strong> • Authorized Subjects:{' '}
+            <strong className="font-mono text-[#00D9FF]">
               {assignedCodes ? assignedCodes.join(', ') : 'ALL INSTITUTIONAL SUBJECTS (ADMIN)'}
             </strong>
           </p>
@@ -127,8 +232,8 @@ export const FacultyPage: React.FC = () => {
       <div className="rounded-2xl border border-amber-400/35 bg-amber-500/10 p-3.5 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200">
         <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
         <span>
-          Simulated Demo Scope: Changes made here immediately update the demo student dashboard and audit logs.
-          Unauthorized subjects are hidden and blocked from faculty edits.
+          Role Isolation Active: Faculty can view student details, put attendance, and verify records strictly for their
+          assigned subjects. Every attendance change writes to the immutable audit log.
         </span>
       </div>
 
@@ -143,6 +248,125 @@ export const FacultyPage: React.FC = () => {
           {feedback.text}
         </div>
       )}
+
+      {/* 1-Click Daily Roll Call ("Put Attendance") */}
+      <div className="glass-card rounded-2xl p-5 space-y-4 border-[#00D9FF]/30">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div>
+            <h2 className="font-display text-lg font-bold flex items-center gap-2">
+              <CalendarCheck className="h-5 w-5 text-[#00D9FF]" /> Put Daily Attendance (Class Roll Call)
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Select your subject and mark Present / Absent in 1 click—updates student dashboards immediately.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={activeRollCallCode}
+              onChange={(e) => setRollCallCode(e.target.value)}
+              className="rounded-xl bg-slate-100 dark:bg-[#080817] border border-slate-300 dark:border-violet-400/30 px-3 py-2 text-xs font-mono font-bold"
+            >
+              {authorizedSubjectCodes.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+            <input
+              value={sessionLabel}
+              onChange={(e) => setSessionLabel(e.target.value)}
+              placeholder="Session note (e.g., Hour 2)"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2 text-xs"
+            />
+            <button
+              onClick={handleMarkAllPresent}
+              disabled={rollCallRows.length === 0}
+              className="neon-button inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-extrabold disabled:opacity-50"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-[#22C55E]" /> Mark All Present
+            </button>
+          </div>
+        </div>
+
+        {rollCallRows.length === 0 ? (
+          <p className="text-xs text-slate-500">
+            No students enrolled under {activeRollCallCode || 'your assigned subjects'} in demo cohort yet.
+          </p>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {rollCallRows.map(({ student, subject, evalRes }) => (
+              <div
+                key={`rc-${student.id}-${subject.id}`}
+                className="rounded-2xl bg-slate-100/80 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 p-4 flex flex-col justify-between gap-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="font-display font-bold text-sm">{student.fullName}</div>
+                    <div className="text-[11px] font-mono text-slate-500">
+                      {student.registerNumber} • {student.heroAlias}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div
+                      className={`font-mono font-extrabold text-sm ${
+                        evalRes.isEligible ? 'text-emerald-400' : 'text-rose-400'
+                      }`}
+                    >
+                      {evalRes.displayPercentage}
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      {subject.attended}/{subject.total}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() =>
+                      handleMarkSingle(
+                        student.id,
+                        student.fullName,
+                        subject.id,
+                        subject.code,
+                        subject.attended,
+                        subject.total,
+                        true
+                      )
+                    }
+                    className="flex-1 inline-flex items-center justify-center gap-1 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/40 py-1.5 text-xs font-bold text-emerald-500 dark:text-emerald-300 transition"
+                  >
+                    <PlusCircle className="h-3.5 w-3.5" /> Present
+                  </button>
+                  <button
+                    onClick={() =>
+                      handleMarkSingle(
+                        student.id,
+                        student.fullName,
+                        subject.id,
+                        subject.code,
+                        subject.attended,
+                        subject.total,
+                        false
+                      )
+                    }
+                    className="flex-1 inline-flex items-center justify-center gap-1 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-400/35 py-1.5 text-xs font-bold text-rose-500 dark:text-rose-300 transition"
+                  >
+                    <MinusCircle className="h-3.5 w-3.5" /> Absent
+                  </button>
+                  <button
+                    onClick={() => setDetailStudentId(student.id)}
+                    className="rounded-xl bg-white/10 hover:bg-white/20 p-2 text-cyan-400 transition"
+                    title="View student details"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Smart Faculty Risk Alerts */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
@@ -198,9 +422,23 @@ export const FacultyPage: React.FC = () => {
         )}
       </div>
 
-      {/* Authorized Subject Attendance Records */}
-      <div className="glass-card rounded-2xl p-5 overflow-x-auto">
-        <h2 className="font-display text-lg font-bold mb-4">Assigned Subject Attendance & Verification</h2>
+      {/* Authorized Subject Attendance Records & Student Details */}
+      <div className="glass-card rounded-2xl p-5 overflow-x-auto space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h2 className="font-display text-lg font-bold flex items-center gap-2">
+            <Users className="h-4 w-4 text-[#00D9FF]" /> Student Details & Attendance Verification
+          </h2>
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
+            <input
+              value={studentSearch}
+              onChange={(e) => setStudentSearch(e.target.value)}
+              placeholder="Search student, Reg No, or subject..."
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 pl-8 pr-3 py-1.5 text-xs"
+            />
+          </div>
+        </div>
+
         <table className="w-full text-left text-xs">
           <thead>
             <tr className="border-b border-slate-200 dark:border-white/10 text-slate-500 uppercase">
@@ -209,7 +447,7 @@ export const FacultyPage: React.FC = () => {
               <th className="py-2 pr-3">Attended / Total</th>
               <th className="py-2 pr-3">Exact %</th>
               <th className="py-2 pr-3">Status</th>
-              <th className="py-2">Action</th>
+              <th className="py-2">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200/70 dark:divide-white/5">
@@ -235,7 +473,13 @@ export const FacultyPage: React.FC = () => {
                     {evalRes.statusLabel}
                   </span>
                 </td>
-                <td className="py-2.5">
+                <td className="py-2.5 flex items-center gap-2">
+                  <button
+                    onClick={() => setDetailStudentId(student.id)}
+                    className="rounded-lg bg-white/10 px-2.5 py-1.5 font-bold hover:bg-white/20 transition"
+                  >
+                    Details
+                  </button>
                   <button
                     onClick={() =>
                       setEditTarget({
@@ -249,7 +493,7 @@ export const FacultyPage: React.FC = () => {
                     }
                     className="rounded-lg bg-electric-500/15 px-3 py-1.5 font-bold text-electric-500 dark:text-cyan-300 hover:bg-electric-500/25"
                   >
-                    Verify / Update
+                    Verify / Edit
                   </button>
                 </td>
               </tr>
@@ -339,18 +583,96 @@ export const FacultyPage: React.FC = () => {
         />
         <button
           type="submit"
-          className="rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 px-5 py-2 text-xs font-extrabold text-slate-950"
+          className="neon-button px-5 py-2 text-xs font-extrabold"
         >
           Publish Announcement
         </button>
       </form>
+
+      {/* Student Details Modal (Strictly scoped to faculty's authorized subjects) */}
+      {detailStudent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setDetailStudentId(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xl rounded-3xl glass-card bg-white dark:bg-[#17152D] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#00D9FF]">
+                  Authorized Student Details
+                </span>
+                <h3 className="font-display text-xl font-extrabold mt-0.5">{detailStudent.fullName}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-300">
+                  Reg No: <span className="font-mono font-bold">{detailStudent.registerNumber}</span> •{' '}
+                  {detailStudent.department} • Sem {detailStudent.semesterNumber} • Alias: {detailStudent.heroAlias}
+                </p>
+              </div>
+              <button
+                onClick={() => setDetailStudentId(null)}
+                className="rounded-xl bg-white/10 p-2 hover:bg-white/20 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {(() => {
+              const visibleSubjects = detailStudent.subjects.filter(
+                (subj) => !assignedCodes || assignedCodes.includes(subj.code)
+              );
+              const scopedSummary = evaluateOverallSubjects(visibleSubjects);
+              return (
+                <div className="space-y-3">
+                  <div className="rounded-xl bg-slate-100/80 dark:bg-white/5 p-3 text-xs flex items-center justify-between">
+                    <span>Standing in Your Authorized Subjects:</span>
+                    <span className="font-mono font-extrabold text-[#00D9FF]">
+                      {scopedSummary.overallEval.displayPercentage} ({scopedSummary.attended}/{scopedSummary.total})
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {visibleSubjects.map((subj) => {
+                      const ev = evaluateAttendance(subj.attended, subj.total, subj.minPercentage);
+                      return (
+                        <div
+                          key={subj.id}
+                          className="rounded-xl bg-slate-100/80 dark:bg-white/5 border border-slate-200 dark:border-white/10 p-3 text-xs flex items-center justify-between gap-3"
+                        >
+                          <div>
+                            <div className="font-bold">
+                              <span className="font-mono text-[#00D9FF]">{subj.code}</span> • {subj.name}
+                            </div>
+                            <div className="text-slate-400">
+                              {ev.attended}/{ev.total} classes •{' '}
+                              {ev.isEligible
+                                ? `${ev.maxSafeAbsences} safe skip(s)`
+                                : `Needs ${ev.requiredRecoveryClasses} straight`}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="font-mono font-bold">{ev.displayPercentage}</div>
+                            <div className={ev.isEligible ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                              {ev.statusLabel}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
 
       {/* Edit Attendance Modal */}
       {editTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <form
             onSubmit={handleSaveAttendance}
-            className="w-full max-w-md rounded-2xl glass-card bg-white dark:bg-[#0b1233] p-6 space-y-4"
+            className="w-full max-w-md rounded-2xl glass-card bg-white dark:bg-[#17152D] p-6 space-y-4"
           >
             <h3 className="font-display text-lg font-bold">
               Update {editTarget.subjectCode} for {editTarget.studentName}
@@ -390,7 +712,7 @@ export const FacultyPage: React.FC = () => {
             <div className="flex gap-2">
               <button
                 type="submit"
-                className="flex-1 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-600 py-2.5 text-xs font-extrabold text-slate-950"
+                className="neon-button flex-1 py-2.5 text-xs font-extrabold"
               >
                 Save & Log Audit
               </button>

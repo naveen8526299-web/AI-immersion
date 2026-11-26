@@ -19,6 +19,14 @@ interface AuthContextValue {
     semesterNumber: number;
     selectedHero: HeroId;
   }) => Promise<{ ok: boolean; error?: string }>;
+  registerFaculty: (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    facultyId: string;
+    assignedSubjectCodes: string[];
+  }) => Promise<{ ok: boolean; error?: string }>;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   logout: () => Promise<void>;
 }
@@ -232,6 +240,85 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { ok: true };
   };
 
+  const registerFaculty = async (payload: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    facultyId: string;
+    assignedSubjectCodes: string[];
+  }): Promise<{ ok: boolean; error?: string }> => {
+    const email = payload.email.trim().toLowerCase();
+    const cleanedCodes = Array.from(
+      new Set(payload.assignedSubjectCodes.map((c) => c.trim().toUpperCase()).filter(Boolean))
+    );
+    if (!payload.fullName.trim() || !email.includes('@') || payload.password.length < 6) {
+      return { ok: false, error: 'Enter a valid faculty name, email, and password (min 6 characters).' };
+    }
+    if (cleanedCodes.length === 0) {
+      return { ok: false, error: 'Select or enter at least one assigned subject code (e.g. MA501, CS502).' };
+    }
+
+    if (isSupabaseConfigured && supabase) {
+      setLoading(true);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: payload.password,
+        options: {
+          data: {
+            fullName: payload.fullName.trim(),
+            role: 'FACULTY',
+            assignedSubjectCodes: cleanedCodes,
+          },
+        },
+      });
+      setLoading(false);
+      if (error || !data.user) {
+        return { ok: false, error: error?.message || 'Faculty registration failed.' };
+      }
+      setUser({
+        ...DEMO_ACCOUNTS.FACULTY,
+        id: data.user.id,
+        email,
+        fullName: payload.fullName.trim(),
+        heroAlias: payload.fullName.trim(),
+        department: payload.department || 'Computer Science & Engineering',
+        registerNumber: payload.facultyId.trim() || 'FAC-NEW',
+        assignedSubjectCodes: cleanedCodes,
+        isDemo: false,
+      });
+      return { ok: true };
+    }
+
+    const newFaculty: UserProfile = {
+      ...DEMO_ACCOUNTS.FACULTY,
+      id: `demo-faculty-${Date.now()}`,
+      email,
+      fullName: payload.fullName.trim(),
+      heroAlias: payload.fullName.trim(),
+      role: 'FACULTY',
+      department: payload.department || 'Computer Science & Engineering',
+      registerNumber: payload.facultyId.trim() || `FAC-${Math.floor(100 + Math.random() * 899)}`,
+      assignedSubjectCodes: cleanedCodes,
+      isDemo: true,
+    };
+
+    try {
+      const storedRaw = localStorage.getItem(REGISTERED_DEMO_USERS_KEY);
+      const storedUsers: Array<UserProfile & { passwordHash: string }> = storedRaw ? JSON.parse(storedRaw) : [];
+      if (storedUsers.some((u) => u.email.toLowerCase() === email)) {
+        return { ok: false, error: 'An account with this email already exists in demo storage.' };
+      }
+      storedUsers.push({ ...newFaculty, passwordHash: btoa(payload.password) });
+      localStorage.setItem(REGISTERED_DEMO_USERS_KEY, JSON.stringify(storedUsers));
+    } catch {
+      // ignore
+    }
+
+    setUser(newFaculty);
+    return { ok: true };
+  };
+
   const updateUserProfile = (updates: Partial<UserProfile>) => {
     setUser((prev) => {
       if (!prev) return prev;
@@ -259,6 +346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginDemo,
         loginWithEmail,
         registerStudent,
+        registerFaculty,
         updateUserProfile,
         logout,
       }}
