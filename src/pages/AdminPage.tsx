@@ -7,7 +7,6 @@ import {
   Eye,
   EyeOff,
   FileText,
-  Info,
   KeyRound,
   Lock,
   Megaphone,
@@ -23,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useAppState } from '../contexts/AppStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { AppNotification, FeatureControlFlags } from '../types';
+import { AppNotification, FeatureControlFlags, GenderCategory } from '../types';
 import { evaluateAttendance, evaluateOverallSubjects } from '../utils/attendanceMath';
 
 export const AdminPage: React.FC = () => {
@@ -31,6 +30,10 @@ export const AdminPage: React.FC = () => {
   const {
     subjects,
     demoCohort,
+    colleges,
+    activeCollegeId,
+    setActiveCollegeId,
+    teachers,
     odRequests,
     auditLogs,
     semester,
@@ -39,6 +42,8 @@ export const AdminPage: React.FC = () => {
     updateFeatureControls,
     adminAddStudent,
     adminBroadcastNotification,
+    enrollCollegeInstitution,
+    addTeacherRecord,
     facultyUpdateStudentAttendance,
     reviewODRequest,
   } = useAppState();
@@ -47,11 +52,33 @@ export const AdminPage: React.FC = () => {
   const [anonymizeView, setAnonymizeView] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [dossierReason, setDossierReason] = useState('Official Admin roll-call update');
+  const [filterByCollegeOnly, setFilterByCollegeOnly] = useState(true);
+
+  // Enroll College state
+  const [clgCode, setClgCode] = useState('');
+  const [clgName, setClgName] = useState('');
+  const [clgCity, setClgCity] = useState('');
+  const [clgAdminName, setClgAdminName] = useState('');
+  const [clgAdminEmail, setClgAdminEmail] = useState('');
+  const [clgDepts, setClgDepts] = useState('CSE, AI&DS, ECE, IT');
+  const [clgFeedback, setClgFeedback] = useState<string | null>(null);
+
+  // Add Teacher state
+  const [tName, setTName] = useState('');
+  const [tId, setTId] = useState('');
+  const [tEmail, setTEmail] = useState('');
+  const [tPhone, setTPhone] = useState('');
+  const [tGender, setTGender] = useState<GenderCategory>('FEMALE');
+  const [tDept, setTDept] = useState('CSE');
+  const [tDesig, setTDesig] = useState('Assistant Professor');
+  const [tCabin, setTCabin] = useState('Academic Block • Room 202');
+  const [tSubjects, setTSubjects] = useState('MA501, CS502');
+  const [tFeedback, setTFeedback] = useState<string | null>(null);
 
   // Enroll Student form state
   const [enrollName, setEnrollName] = useState('');
   const [enrollReg, setEnrollReg] = useState('');
-  const [enrollDept, setEnrollDept] = useState('CSE (CoE AI)');
+  const [enrollDept, setEnrollDept] = useState('CSE');
   const [enrollSem, setEnrollSem] = useState(5);
   const [enrollAlias, setEnrollAlias] = useState('');
   const [enrollFeedback, setEnrollFeedback] = useState<string | null>(null);
@@ -63,15 +90,27 @@ export const AdminPage: React.FC = () => {
   const [notifMessage, setNotifMessage] = useState('');
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
+  const currentCollege = colleges.find((c) => c.id === activeCollegeId) || colleges[0];
+
   const allStudents = useMemo(
     () => [
       {
         id: 'demo-student-1',
+        collegeId: 'clg-au-coe',
         fullName: 'Arjun Karthik',
         heroAlias: 'CyberShield-07',
         registerNumber: '22CSE042',
-        department: 'CSE (CoE AI)',
+        department: 'CSE',
         semesterNumber: 5,
+        yearOfStudy: 3,
+        gender: 'MALE' as GenderCategory,
+        email: 'arjun.hero@campus.edu',
+        phone: '+91 98401 22410',
+        residenceType: 'Day Scholar' as const,
+        skills: ['React', 'TypeScript'],
+        hackathonInterest: 'SIH AI',
+        privacyShowProfile: true,
+        privacyShowLocation: true,
         subjects,
       },
       ...demoCohort,
@@ -80,12 +119,14 @@ export const AdminPage: React.FC = () => {
   );
 
   const filteredStudents = allStudents.filter((s) => {
+    if (filterByCollegeOnly && s.collegeId !== activeCollegeId) return false;
     const q = search.trim().toLowerCase();
     return (
       !q ||
       s.fullName.toLowerCase().includes(q) ||
       s.heroAlias.toLowerCase().includes(q) ||
-      s.registerNumber.toLowerCase().includes(q)
+      s.registerNumber.toLowerCase().includes(q) ||
+      s.department.toLowerCase().includes(q)
     );
   });
 
@@ -169,6 +210,26 @@ export const AdminPage: React.FC = () => {
       label: 'Enable Hero Companions, Armory & XP',
       desc: 'Controls cosmic mascot companions, badges, and reward shop visibility.',
     },
+    {
+      key: 'allowCampusSocialFeed',
+      label: 'Enable Campus Network (Photos, Posts & Reels)',
+      desc: 'Allows students & faculty in the same college to share updates & connect.',
+    },
+    {
+      key: 'allowHackathonTeamFinder',
+      label: 'Enable Hackathon Forge Teammate Finder',
+      desc: 'Allows pitching hackathon project ideas and applying across departments.',
+    },
+    {
+      key: 'allowLiveLocationCheckIn',
+      label: 'Enable Opt-In Live Campus Location Radar',
+      desc: 'Allows optional privacy-controlled campus zone check-in and Girls/Boys hubs.',
+    },
+    {
+      key: 'enableMorningAttendancePrompt',
+      label: 'Enable Daily Morning "Coming Today?" Question',
+      desc: 'Prompts students each morning and warns low-attendance students to attend.',
+    },
   ];
 
   const exportInstitutionalReport = () => {
@@ -205,12 +266,203 @@ export const AdminPage: React.FC = () => {
         </button>
       </div>
 
-      <div className="rounded-2xl border border-amber-400/35 bg-amber-500/10 p-3.5 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-200">
-        <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-500" />
-        <span>
-          Simulated Institutional Mode: Demonstrates college-wide eligibility reporting, rule configuration, OD
-          governance, and immutable audit logs. Live ERP synchronization requires authorized college API / Supabase deployment.
-        </span>
+      <div className="rounded-2xl border border-[#00D9FF]/35 bg-[#00D9FF]/10 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+        <div className="flex items-start gap-2.5 text-slate-700 dark:text-slate-200">
+          <Building2 className="h-4 w-4 shrink-0 mt-0.5 text-[#00D9FF]" />
+          <div>
+            <strong>Active College Tenant: {currentCollege?.name} ({currentCollege?.code})</strong>
+            <div className="text-[11px] opacity-85">
+              Announcements, circular broadcasts, student eligibility reports, and teacher directory isolate automatically to the selected college.
+            </div>
+          </div>
+        </div>
+        <select
+          value={activeCollegeId}
+          onChange={(e) => setActiveCollegeId(e.target.value)}
+          className="rounded-xl bg-white dark:bg-[#101027] border border-slate-300 dark:border-white/20 px-3 py-2 text-xs font-bold shrink-0"
+        >
+          {colleges.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name} ({c.code})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Multi-College Onboarding + Add Teacher */}
+      <div className="grid lg:grid-cols-2 gap-6">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const res = enrollCollegeInstitution({
+              code: clgCode,
+              name: clgName,
+              city: clgCity,
+              adminName: clgAdminName,
+              adminEmail: clgAdminEmail,
+              departments: clgDepts.split(',').map((d) => d.trim()).filter(Boolean),
+            });
+            setClgFeedback(res.ok ? `College ${clgName} enrolled & activated! Announcements are now isolated to this campus.` : res.error || 'Error');
+            if (res.ok) {
+              setClgCode('');
+              setClgName('');
+              setClgCity('');
+              setClgAdminName('');
+              setClgAdminEmail('');
+            }
+          }}
+          className="glass-card rounded-2xl p-5 space-y-3 text-xs"
+        >
+          <h2 className="font-display text-lg font-bold flex items-center gap-2 text-[#00D9FF]">
+            <Building2 className="h-4 w-4" /> Enroll Another College Administration ({colleges.length} Active)
+          </h2>
+          <div className="grid sm:grid-cols-2 gap-2.5">
+            <input
+              required
+              value={clgCode}
+              onChange={(e) => setClgCode(e.target.value)}
+              placeholder="College Code (e.g. SSN-CH)"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2 font-mono uppercase"
+            />
+            <input
+              required
+              value={clgName}
+              onChange={(e) => setClgName(e.target.value)}
+              placeholder="College Full Name"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={clgCity}
+              onChange={(e) => setClgCity(e.target.value)}
+              placeholder="City / Campus"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={clgAdminName}
+              onChange={(e) => setClgAdminName(e.target.value)}
+              placeholder="Principal / Admin Name"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              required
+              type="email"
+              value={clgAdminEmail}
+              onChange={(e) => setClgAdminEmail(e.target.value)}
+              placeholder="Official Admin Email"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={clgDepts}
+              onChange={(e) => setClgDepts(e.target.value)}
+              placeholder="Departments (CSE, AI&DS, ECE)"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+          </div>
+          {clgFeedback && <div className="rounded-xl bg-cyan-500/10 border border-cyan-400/30 px-3 py-2 text-cyan-300">{clgFeedback}</div>}
+          <button type="submit" className="rounded-xl bg-gradient-to-r from-[#00D9FF] to-[#1677FF] px-4 py-2 font-extrabold text-slate-950">
+            Enroll College &amp; Scope Announcements
+          </button>
+        </form>
+
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const res = addTeacherRecord({
+              fullName: tName,
+              facultyId: tId,
+              email: tEmail,
+              phone: tPhone,
+              gender: tGender,
+              department: tDept,
+              designation: tDesig,
+              cabinLocation: tCabin,
+              assignedSubjectCodes: tSubjects.split(',').map((s) => s.trim()),
+              researchAreas: [tDept, 'Student Mentorship'],
+              officeHours: 'Mon–Fri • 2:00 PM – 4:00 PM',
+            });
+            setTFeedback(res.ok ? `Added ${tName} (${tId.toUpperCase()}) to ${currentCollege?.code} Teachers Directory.` : res.error || 'Error');
+            if (res.ok) {
+              setTName('');
+              setTId('');
+              setTEmail('');
+              setTPhone('');
+            }
+          }}
+          className="glass-card rounded-2xl p-5 space-y-3 text-xs"
+        >
+          <h2 className="font-display text-lg font-bold flex items-center gap-2 text-emerald-400">
+            <UserPlus className="h-4 w-4" /> Register Teacher / Faculty Details ({teachers.filter((t) => t.collegeId === activeCollegeId).length} in {currentCollege?.code})
+          </h2>
+          <div className="grid sm:grid-cols-2 gap-2.5">
+            <input
+              required
+              value={tName}
+              onChange={(e) => setTName(e.target.value)}
+              placeholder="Teacher Full Name"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              required
+              value={tId}
+              onChange={(e) => setTId(e.target.value)}
+              placeholder="Faculty ID (e.g. FAC-209)"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2 font-mono uppercase"
+            />
+            <input
+              required
+              type="email"
+              value={tEmail}
+              onChange={(e) => setTEmail(e.target.value)}
+              placeholder="Faculty Email"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={tPhone}
+              onChange={(e) => setTPhone(e.target.value)}
+              placeholder="Phone Number"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                value={tDept}
+                onChange={(e) => setTDept(e.target.value)}
+                placeholder="Dept"
+                className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+              />
+              <select
+                value={tGender}
+                onChange={(e) => setTGender(e.target.value as GenderCategory)}
+                className="rounded-xl bg-slate-100 dark:bg-[#101027] border border-slate-300 dark:border-white/15 px-2.5 py-2"
+              >
+                <option value="FEMALE">Female</option>
+                <option value="MALE">Male</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <input
+              value={tDesig}
+              onChange={(e) => setTDesig(e.target.value)}
+              placeholder="Designation"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={tCabin}
+              onChange={(e) => setTCabin(e.target.value)}
+              placeholder="Cabin Location"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+            />
+            <input
+              value={tSubjects}
+              onChange={(e) => setTSubjects(e.target.value)}
+              placeholder="Assigned Subjects (MA501, CS502)"
+              className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2 font-mono uppercase"
+            />
+          </div>
+          {tFeedback && <div className="rounded-xl bg-emerald-500/10 border border-emerald-400/30 px-3 py-2 text-emerald-300">{tFeedback}</div>}
+          <button type="submit" className="rounded-xl bg-gradient-to-r from-emerald-400 to-cyan-500 px-4 py-2 font-extrabold text-slate-950">
+            Add Teacher to College Directory
+          </button>
+        </form>
       </div>
 
       {/* Website Feature Access Control */}
@@ -457,6 +709,12 @@ export const AdminPage: React.FC = () => {
                 className="rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 pl-8 pr-3 py-1.5 text-xs"
               />
             </div>
+            <button
+              onClick={() => setFilterByCollegeOnly(!filterByCollegeOnly)}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold"
+            >
+              {filterByCollegeOnly ? `College: ${currentCollege?.code}` : 'All Colleges'}
+            </button>
             <button
               onClick={() => setAnonymizeView(!anonymizeView)}
               className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 px-3 py-1.5 text-xs font-bold"

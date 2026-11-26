@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { RotatingGoldenShield, SpinningGoldCoin } from '../components/CosmicBadges';
 import { HeroAvatarSVG, ThanosAdminArtwork } from '../components/HeroCharacters';
+import { MorningCheckInCard } from '../components/MorningCheckInCard';
 import { SubjectCard } from '../components/SubjectCard';
 import { TodayScheduleCard } from '../components/TodayScheduleCard';
 import { useAppState } from '../contexts/AppStateContext';
@@ -237,6 +238,9 @@ export const DashboardPage: React.FC = () => {
       })()}
 
       {/* Today's College Timetable & 1-Tap Daily Check-In */}
+      {/* Daily Morning Check-In & Attendance Warning */}
+      <MorningCheckInCard />
+
       <TodayScheduleCard />
 
       {/* Primary KPI Grid */}

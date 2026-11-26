@@ -1,6 +1,14 @@
 export type UserRole = 'STUDENT' | 'FACULTY' | 'ADMIN';
 
-export type HeroId = 'captain-campus' | 'iron-scholar' | 'doctor-deadline' | 'spider-coder';
+export type HeroId =
+  | 'captain-campus'
+  | 'iron-scholar'
+  | 'doctor-deadline'
+  | 'spider-coder'
+  | 'nova-forge'
+  | 'dawn-wing';
+
+export type GenderCategory = 'FEMALE' | 'MALE' | 'OTHER';
 
 export type HeroMood = 'happy' | 'sad' | 'worried' | 'angry' | 'celebration' | 'warning' | 'idle';
 
@@ -59,6 +67,16 @@ export interface UserProfile {
   squadPrivacyShowExact: boolean; // default false: mask exact percentages
   anonymizeInPublicLists: boolean;
   assignedSubjectCodes?: string[]; // for faculty authorization
+  collegeId?: string;
+  collegeName?: string;
+  gender?: GenderCategory;
+  yearOfStudy?: number;
+  phone?: string;
+  skills?: string[];
+  bio?: string;
+  privacyLocationOptIn?: boolean;
+  privacyShowDirectory?: boolean;
+  privacyGirlsOnlyConnect?: boolean;
   isDemo: boolean;
 }
 
@@ -187,6 +205,7 @@ export interface AchievementBadge {
 
 export interface AppNotification {
   id: string;
+  collegeId?: string;
   title: string;
   message: string;
   category: 'WARNING' | 'RECOVERY' | 'OD' | 'TASK' | 'SQUAD' | 'EXAM' | 'ACHIEVEMENT' | 'ANNOUNCEMENT';
@@ -223,6 +242,7 @@ export interface AuditLogEntry {
 
 export interface FacultyAnnouncement {
   id: string;
+  collegeId?: string;
   authorName: string;
   subjectCode: string;
   title: string;
@@ -230,14 +250,145 @@ export interface FacultyAnnouncement {
   createdAt: string;
 }
 
+export interface LocationTrackingInfo {
+  optedIn: boolean;
+  zoneLabel: string;
+  lat?: number;
+  lng?: number;
+  onCampus: boolean;
+  distanceMeters?: number;
+  updatedAt: string;
+}
+
+export interface CollegeInstitution {
+  id: string;
+  code: string;
+  name: string;
+  city: string;
+  campusLat: number;
+  campusLng: number;
+  campusRadiusMeters: number;
+  adminName: string;
+  adminEmail: string;
+  departments: string[];
+  createdAt: string;
+}
+
 export interface DemoStudentRecord {
   id: string;
+  collegeId: string;
   fullName: string;
   heroAlias: string;
   registerNumber: string;
   department: string;
   semesterNumber: number;
+  yearOfStudy: number;
+  gender: GenderCategory;
+  email: string;
+  phone: string;
+  residenceType: 'Hostel' | 'Day Scholar';
+  skills: string[];
+  hackathonInterest: string;
+  privacyShowProfile: boolean;
+  privacyShowLocation: boolean;
+  location?: LocationTrackingInfo;
   subjects: Subject[];
+}
+
+export interface TeacherDirectoryRecord {
+  id: string;
+  collegeId: string;
+  fullName: string;
+  facultyId: string;
+  email: string;
+  phone: string;
+  gender: GenderCategory;
+  department: string;
+  designation: string;
+  cabinLocation: string;
+  assignedSubjectCodes: string[];
+  researchAreas: string[];
+  officeHours: string;
+  privacyShowLocation: boolean;
+  location?: LocationTrackingInfo;
+}
+
+export interface MorningCheckInResponse {
+  id: string;
+  date: string;
+  studentId: string;
+  studentName: string;
+  registerNumber: string;
+  collegeId: string;
+  department: string;
+  yearOfStudy: number;
+  gender: GenderCategory;
+  status: 'COMING' | 'NOT_COMING' | 'LATE';
+  reason?: string;
+  lowAttendanceWarned: boolean;
+  overallPercentage: number;
+  location?: LocationTrackingInfo;
+  createdAt: string;
+}
+
+export interface HackathonApplicant {
+  id: string;
+  applicantId: string;
+  applicantName: string;
+  department: string;
+  yearOfStudy: number;
+  skills: string;
+  pitch: string;
+  status: 'PENDING' | 'ACCEPTED' | 'DECLINED';
+  appliedAt: string;
+}
+
+export interface HackathonPost {
+  id: string;
+  collegeId: string;
+  creatorId: string;
+  creatorName: string;
+  creatorDept: string;
+  creatorYear: number;
+  creatorGender: GenderCategory;
+  title: string;
+  ideaSummary: string;
+  domain: string;
+  neededRoles: string[];
+  techStack: string[];
+  teamSizeMax: number;
+  currentMembers: number;
+  deadline: string;
+  prizeOrEvent: string;
+  status: 'OPEN' | 'CLOSED';
+  applicants: HackathonApplicant[];
+  createdAt: string;
+}
+
+export interface CampusComment {
+  id: string;
+  authorName: string;
+  text: string;
+  createdAt: string;
+}
+
+export interface CampusMediaPost {
+  id: string;
+  collegeId: string;
+  authorId: string;
+  authorName: string;
+  authorAlias: string;
+  authorRole: UserRole;
+  authorDept: string;
+  authorYear: number;
+  authorGender: GenderCategory;
+  postType: 'PHOTO' | 'POST' | 'REEL' | 'ACHIEVEMENT';
+  caption: string;
+  tags: string[];
+  mediaUrl?: string;
+  likes: string[];
+  comments: CampusComment[];
+  createdAt: string;
 }
 
 export interface FeatureControlFlags {
@@ -247,6 +398,10 @@ export interface FeatureControlFlags {
   allowSquadConnect: boolean;
   allowODRequests: boolean;
   allowHeroGamification: boolean;
+  allowCampusSocialFeed: boolean;
+  allowHackathonTeamFinder: boolean;
+  allowLiveLocationCheckIn: boolean;
+  enableMorningAttendancePrompt: boolean;
 }
 
 export interface AppPreferences {
