@@ -12,56 +12,11 @@ interface HeroAvatarProps {
   animateFloat?: boolean;
 }
 
-const HERO_IMAGES: Partial<Record<HeroId, string>> = {
+const HERO_IMAGES: Record<HeroId, string> = {
   'captain-campus': assetUrl('assets/characters/captain-campus.jpg'),
   'iron-scholar': assetUrl('assets/characters/iron-scholar.jpg'),
   'doctor-deadline': assetUrl('assets/characters/doctor-deadline.jpg'),
   'spider-coder': assetUrl('assets/characters/spider-coder.jpg'),
-};
-
-const CustomCosmicHeroSVG: React.FC<{ heroId: 'nova-forge' | 'dawn-wing'; mood: HeroMood }> = ({
-  heroId,
-  mood,
-}) => {
-  const isNova = heroId === 'nova-forge';
-  const gradId = isNova ? 'novaForgeGrad' : 'dawnWingGrad';
-  return (
-    <svg viewBox="0 0 120 120" className="w-full h-full">
-      <defs>
-        <radialGradient id={gradId} cx="45%" cy="35%" r="70%">
-          <stop offset="0%" stopColor={isNova ? '#FFC857' : '#00D9FF'} stopOpacity="0.95" />
-          <stop offset="55%" stopColor={isNova ? '#10B981' : '#8138F5'} stopOpacity="0.9" />
-          <stop offset="100%" stopColor="#080817" />
-        </radialGradient>
-      </defs>
-      <rect width="120" height="120" fill={`url(#${gradId})`} />
-      {/* Halo / Wings */}
-      {isNova ? (
-        <polygon points="60,8 73,26 47,26" fill="#FFC857" opacity="0.85" />
-      ) : (
-        <path d="M12 52 Q36 24 60 44 Q84 24 108 52 Q84 62 60 55 Q36 62 12 52Z" fill="#FF4D8D" opacity="0.55" />
-      )}
-      {/* Shoulders / Armor */}
-      <path d="M22 118 C24 88 96 88 98 118 Z" fill={isNova ? '#064E3B' : '#311042'} stroke="#FFFFFF" strokeOpacity="0.3" />
-      <circle cx="60" cy="100" r="8" fill={isNova ? '#FFC857' : '#00D9FF'} />
-      {/* Head / Helmet */}
-      <circle cx="60" cy="54" r="24" fill={isNova ? '#1E293B' : '#1E1B4B'} stroke={isNova ? '#FFC857' : '#00D9FF'} strokeWidth="2.5" />
-      {/* Visor & Blinking Eyes */}
-      <rect x="39" y="45" width="42" height="14" rx="7" fill="#080817" stroke={isNova ? '#34D399' : '#38BDF8'} strokeWidth="1.5" />
-      <g className="animate-blink">
-        <circle cx="50" cy="52" r="3.4" fill={mood === 'warning' || mood === 'angry' ? '#FF3155' : isNova ? '#FFC857' : '#00D9FF'} />
-        <circle cx="70" cy="52" r="3.4" fill={mood === 'warning' || mood === 'angry' ? '#FF3155' : isNova ? '#FFC857' : '#00D9FF'} />
-      </g>
-      {/* Smile / Expression */}
-      <path
-        d={mood === 'sad' || mood === 'worried' ? 'M52 69 Q60 64 68 69' : 'M51 66 Q60 73 69 66'}
-        fill="none"
-        stroke="#F8FAFF"
-        strokeWidth="2.4"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
 };
 
 const AURA_STYLES: Record<string, { border: string; ring: string; glow: string }> = {
@@ -139,27 +94,21 @@ export const HeroAvatarSVG: React.FC<HeroAvatarProps> = ({
       <div
         className={`relative w-full h-full rounded-full overflow-hidden border-2 ring-4 bg-[#17152D] ${aura.border} ${aura.ring} ${aura.glow}`}
       >
-        {heroId === 'nova-forge' || heroId === 'dawn-wing' ? (
-          <CustomCosmicHeroSVG heroId={heroId} mood={mood} />
-        ) : (
-          <>
-            <img
-              src={imgSrc}
-              alt={heroId}
-              className={`w-full h-full object-cover object-top transition-transform duration-300 ${
-                mood === 'sad' ? 'saturate-75 brightness-90' : mood === 'celebration' ? 'saturate-125 brightness-105' : ''
-              }`}
-            />
+        <img
+          src={imgSrc}
+          alt={heroId}
+          className={`w-full h-full object-cover object-top transition-transform duration-300 ${
+            mood === 'sad' ? 'saturate-75 brightness-90' : mood === 'celebration' ? 'saturate-125 brightness-105' : ''
+          }`}
+        />
 
-            {/* Subtle animated eye-blink & cosmic sheen SVG overlay */}
-            <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 w-full h-full">
-              <g className="animate-blink">
-                <ellipse cx="42" cy="36" rx="8" ry="3.2" fill="#080817" />
-                <ellipse cx="62" cy="36" rx="8" ry="3.2" fill="#080817" />
-              </g>
-            </svg>
-          </>
-        )}
+        {/* Subtle animated eye-blink & cosmic sheen SVG overlay */}
+        <svg viewBox="0 0 100 100" className="pointer-events-none absolute inset-0 w-full h-full">
+          <g className="animate-blink">
+            <ellipse cx="42" cy="36" rx="8" ry="3.2" fill="#080817" />
+            <ellipse cx="62" cy="36" rx="8" ry="3.2" fill="#080817" />
+          </g>
+        </svg>
 
         {/* Expression lighting tint */}
         {(mood === 'warning' || mood === 'angry') && (

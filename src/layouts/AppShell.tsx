@@ -10,20 +10,17 @@ import {
   CheckSquare,
   Compass,
   Flame,
-  Globe2,
   GraduationCap,
   LayoutDashboard,
   LogOut,
   Menu,
   Moon,
-  Radio,
   Search,
   Settings,
   Shield,
   Sliders,
   Sparkles,
   Sun,
-  Trophy,
   User,
   Users,
   X,
@@ -39,7 +36,6 @@ import { CommandPalette } from '../components/CommandPalette';
 import { CosmicBackdrop } from '../components/CosmicBackdrop';
 import { SpinningGoldCoin } from '../components/CosmicBadges';
 import { FloatingCompanion } from '../components/FloatingCompanion';
-import { GeminiCopilotDrawer } from '../components/GeminiCopilotDrawer';
 import { LevelUpModal } from '../components/LevelUpModal';
 import { ThanosEmergencyModal } from '../components/ThanosEmergencyModal';
 import { ToastBanner } from '../components/ToastBanner';
@@ -62,9 +58,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/heroes', label: 'Hero Companions', icon: <Sparkles className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowHeroGamification' },
   { to: '/armory', label: 'Hero Armory', icon: <Award className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowHeroGamification' },
   { to: '/squad', label: 'Squad Connect', icon: <Users className="h-4 w-4" />, roles: ['STUDENT'], featureKey: 'allowSquadConnect' },
-  { to: '/campus-hub', label: 'Campus Network', icon: <Globe2 className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'], featureKey: 'allowCampusSocialFeed' },
-  { to: '/hackathons', label: 'Hackathon Forge', icon: <Trophy className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'], featureKey: 'allowHackathonTeamFinder' },
-  { to: '/live-radar', label: 'Live Campus Radar', icon: <Radio className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'], featureKey: 'allowLiveLocationCheckIn' },
   { to: '/tasks', label: 'Tasks & Projects', icon: <CheckSquare className="h-4 w-4" />, roles: ['STUDENT'] },
   { to: '/semester', label: 'Semester Radar', icon: <Calendar className="h-4 w-4" />, roles: ['STUDENT', 'FACULTY', 'ADMIN'] },
   { to: '/insights', label: 'AI Insights', icon: <Flame className="h-4 w-4" />, roles: ['STUDENT'] },
@@ -81,7 +74,6 @@ export const AppShell: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
-  const [geminiOpen, setGeminiOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -213,15 +205,6 @@ export const AppShell: React.FC = () => {
               <Search className="h-3.5 w-3.5 text-cyan-400" />
               <span>Quick Jump...</span>
               <kbd className="rounded bg-slate-200 dark:bg-white/10 px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
-            </button>
-
-            <button
-              onClick={() => setGeminiOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-[#00D9FF]/20 to-[#8138F5]/25 border border-[#00D9FF]/45 px-3 py-1.5 text-xs font-extrabold text-cyan-700 dark:text-[#00D9FF] hover:brightness-110 transition"
-              title="Open Gemini Campus Copilot"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Gemini AI</span>
             </button>
 
             {user?.role === 'STUDENT' && featureControls.allowHeroGamification && (
@@ -405,7 +388,6 @@ export const AppShell: React.FC = () => {
 
       {/* Global Interactive Overlays */}
       {user?.role === 'STUDENT' && <FloatingCompanion />}
-      <GeminiCopilotDrawer open={geminiOpen} onClose={() => setGeminiOpen(false)} />
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} />
       <ToastBanner />
       <LevelUpModal />

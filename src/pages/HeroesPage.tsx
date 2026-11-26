@@ -92,8 +92,8 @@ export const HeroesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 6 Selectable Hero Cards */}
-      <div className="grid sm:grid-cols-2 xl:grid-cols-3 gap-5">
+      {/* 4 Selectable Hero Cards */}
+      <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-5">
         {(Object.keys(HEROES) as HeroId[]).map((hId) => {
           const meta = HEROES[hId];
           const isSelected = activeHeroId === hId;

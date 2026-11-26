@@ -5,11 +5,7 @@ import {
   INITIAL_ACHIEVEMENTS,
   INITIAL_ANNOUNCEMENTS,
   INITIAL_AUDIT_LOGS,
-  INITIAL_CAMPUS_POSTS,
-  INITIAL_COLLEGES,
   INITIAL_DEMO_COHORT,
-  INITIAL_HACKATHONS,
-  INITIAL_MORNING_CHECKINS,
   INITIAL_NOTIFICATIONS,
   INITIAL_OD_REQUESTS,
   INITIAL_RECORDS,
@@ -18,7 +14,6 @@ import {
   INITIAL_SQUAD,
   INITIAL_SUBJECTS,
   INITIAL_TASKS,
-  INITIAL_TEACHERS,
   INITIAL_THANOS_ALERTS,
 } from '../services/demoData';
 import {
@@ -27,17 +22,11 @@ import {
   AppPreferences,
   AttendanceRecord,
   AuditLogEntry,
-  CampusMediaPost,
-  CollegeInstitution,
   DemoStudentRecord,
   FacultyAnnouncement,
   FeatureControlFlags,
-  GenderCategory,
-  HackathonPost,
   HeroId,
   HeroMood,
-  LocationTrackingInfo,
-  MorningCheckInResponse,
   ODEventType,
   ODRequest,
   RewardTransaction,
@@ -45,7 +34,6 @@ import {
   Squad,
   SquadTask,
   Subject,
-  TeacherDirectoryRecord,
   ThanosAlertRecord,
   UserProfile,
 } from '../types';
@@ -97,21 +85,11 @@ function mergeRegisteredStudentsIntoCohort(
     existingRegs.add(regClean);
     additions.push({
       id: cand.id,
-      collegeId: cand.collegeId || 'clg-au-coe',
       fullName: cand.fullName?.trim() || 'Registered Student',
       heroAlias: cand.heroAlias?.trim() || `Guard-${regClean.slice(-3)}`,
       registerNumber: regClean,
       department: cand.department?.trim() || 'CSE',
       semesterNumber: cand.semesterNumber || 5,
-      yearOfStudy: cand.yearOfStudy || Math.max(1, Math.min(4, Math.ceil((cand.semesterNumber || 5) / 2))),
-      gender: cand.gender || 'OTHER',
-      email: cand.email || `${regClean.toLowerCase()}@campus.edu`,
-      phone: cand.phone || '',
-      residenceType: 'Day Scholar',
-      skills: cand.skills && cand.skills.length > 0 ? cand.skills : ['React', 'Python'],
-      hackathonInterest: 'Open to Hackathon Teams',
-      privacyShowProfile: cand.privacyShowDirectory ?? true,
-      privacyShowLocation: cand.privacyLocationOptIn ?? false,
       subjects: templateSubjects.map((s, idx) => ({
         ...s,
         id: `${cand.id}-s${idx + 1}`,
@@ -139,12 +117,6 @@ interface PersistedState {
   auditLogs: AuditLogEntry[];
   thanosAlerts: ThanosAlertRecord[];
   demoCohort: DemoStudentRecord[];
-  colleges: CollegeInstitution[];
-  activeCollegeId: string;
-  teachers: TeacherDirectoryRecord[];
-  morningCheckIns: MorningCheckInResponse[];
-  hackathons: HackathonPost[];
-  campusPosts: CampusMediaPost[];
   preferences: AppPreferences;
   featureControls: FeatureControlFlags;
 }
@@ -169,12 +141,6 @@ function loadInitialState(): PersistedState {
         auditLogs: parsed.auditLogs ?? INITIAL_AUDIT_LOGS,
         thanosAlerts: parsed.thanosAlerts ?? INITIAL_THANOS_ALERTS,
         demoCohort: mergeRegisteredStudentsIntoCohort(parsed.demoCohort ?? INITIAL_DEMO_COHORT, baseSubjects),
-        colleges: parsed.colleges ?? INITIAL_COLLEGES,
-        activeCollegeId: parsed.activeCollegeId || INITIAL_COLLEGES[0].id,
-        teachers: parsed.teachers ?? INITIAL_TEACHERS,
-        morningCheckIns: parsed.morningCheckIns ?? INITIAL_MORNING_CHECKINS,
-        hackathons: parsed.hackathons ?? INITIAL_HACKATHONS,
-        campusPosts: parsed.campusPosts ?? INITIAL_CAMPUS_POSTS,
         preferences: parsed.preferences ? { ...DEFAULT_PREFERENCES, ...parsed.preferences } : DEFAULT_PREFERENCES,
         featureControls: parsed.featureControls
           ? { ...DEFAULT_FEATURE_CONTROLS, ...parsed.featureControls }
@@ -199,12 +165,6 @@ function loadInitialState(): PersistedState {
     auditLogs: INITIAL_AUDIT_LOGS,
     thanosAlerts: INITIAL_THANOS_ALERTS,
     demoCohort: mergeRegisteredStudentsIntoCohort(INITIAL_DEMO_COHORT, INITIAL_SUBJECTS),
-    colleges: INITIAL_COLLEGES,
-    activeCollegeId: INITIAL_COLLEGES[0].id,
-    teachers: INITIAL_TEACHERS,
-    morningCheckIns: INITIAL_MORNING_CHECKINS,
-    hackathons: INITIAL_HACKATHONS,
-    campusPosts: INITIAL_CAMPUS_POSTS,
     preferences: DEFAULT_PREFERENCES,
     featureControls: DEFAULT_FEATURE_CONTROLS,
   };
@@ -298,63 +258,6 @@ interface AppStateContextValue extends PersistedState {
     title: string;
     message: string;
   }) => { ok: boolean; error?: string };
-  setActiveCollegeId: (collegeId: string) => void;
-  enrollCollegeInstitution: (payload: {
-    code: string;
-    name: string;
-    city: string;
-    adminName: string;
-    adminEmail: string;
-    departments: string[];
-  }) => { ok: boolean; error?: string; college?: CollegeInstitution };
-  addTeacherRecord: (payload: {
-    fullName: string;
-    facultyId: string;
-    email: string;
-    phone: string;
-    gender: GenderCategory;
-    department: string;
-    designation: string;
-    cabinLocation: string;
-    assignedSubjectCodes: string[];
-    researchAreas: string[];
-    officeHours: string;
-  }) => { ok: boolean; error?: string };
-  submitMorningCheckIn: (
-    status: 'COMING' | 'NOT_COMING' | 'LATE',
-    reason?: string,
-    location?: LocationTrackingInfo
-  ) => { ok: boolean; lowAttendanceWarned: boolean };
-  updateStudentLocation: (location: LocationTrackingInfo) => void;
-  updateMyPrivacyAndDetails: (updates: {
-    privacyLocationOptIn?: boolean;
-    privacyShowDirectory?: boolean;
-    privacyGirlsOnlyConnect?: boolean;
-    gender?: GenderCategory;
-    phone?: string;
-    skills?: string[];
-    yearOfStudy?: number;
-  }) => void;
-  createHackathonPost: (payload: {
-    title: string;
-    ideaSummary: string;
-    domain: string;
-    neededRoles: string[];
-    techStack: string[];
-    teamSizeMax: number;
-    deadline: string;
-    prizeOrEvent: string;
-  }) => { ok: boolean; error?: string };
-  applyToHackathon: (hackathonId: string, pitch: string, skills: string) => { ok: boolean; error?: string };
-  reviewHackathonApplicant: (hackathonId: string, applicantId: string, decision: 'ACCEPTED' | 'DECLINED') => void;
-  createCampusPost: (payload: {
-    postType: CampusMediaPost['postType'];
-    caption: string;
-    tags: string[];
-    mediaUrl?: string;
-  }) => { ok: boolean; error?: string };
-  toggleLikeCampusPost: (postId: string) => void;
-  addCommentCampusPost: (postId: string, text: string) => void;
   updatePreferences: (updates: Partial<AppPreferences>) => void;
   resetDemoState: () => void;
 }
@@ -1063,10 +966,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const addAnnouncement = (subjectCode: string, title: string, message: string) => {
     if (!user) return;
-    const targetCollegeId = user.collegeId || state.activeCollegeId;
     const ann: FacultyAnnouncement = {
       id: `ann-${Date.now()}`,
-      collegeId: targetCollegeId,
       authorName: user.fullName,
       subjectCode,
       title,
@@ -1075,7 +976,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
     const notif: AppNotification = {
       id: `notif-ann-${Date.now()}`,
-      collegeId: targetCollegeId,
       title: `Announcement (${subjectCode}): ${title}`,
       message,
       category: 'ANNOUNCEMENT',
@@ -1654,21 +1554,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }));
     const newStudent: DemoStudentRecord = {
       id: newId,
-      collegeId: user.collegeId || state.activeCollegeId,
       fullName: payload.fullName.trim(),
       heroAlias: payload.heroAlias?.trim() || `Guard-${regClean.slice(-3)}`,
       registerNumber: regClean,
       department: payload.department.trim() || 'CSE',
       semesterNumber: payload.semesterNumber || 5,
-      yearOfStudy: Math.max(1, Math.min(4, Math.ceil((payload.semesterNumber || 5) / 2))),
-      gender: 'OTHER',
-      email: `${regClean.toLowerCase()}@campus.edu`,
-      phone: '',
-      residenceType: 'Day Scholar',
-      skills: ['React', 'Python'],
-      hackathonInterest: 'Open to College Hackathons',
-      privacyShowProfile: true,
-      privacyShowLocation: false,
       subjects: enrolledSubjects,
     };
     const audit: AuditLogEntry = {
@@ -1712,10 +1602,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         ? 'assets/characters/doctor-deadline.jpg'
         : 'assets/characters/captain-campus.jpg';
 
-    const targetCollegeId = user.collegeId || state.activeCollegeId;
     const notif: AppNotification = {
       id: `notif-adm-${Date.now()}`,
-      collegeId: targetCollegeId,
       title: `[${payload.target === 'AT_RISK' ? 'AT-RISK ALERT' : 'COLLEGE NOTICE'}] ${payload.title.trim()}`,
       message: payload.message.trim(),
       category: payload.category,
@@ -1726,7 +1614,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     const ann: FacultyAnnouncement = {
       id: `ann-adm-${Date.now()}`,
-      collegeId: targetCollegeId,
       authorName: `${user.fullName} (Admin)`,
       subjectCode: payload.target === 'AT_RISK' ? 'AT-RISK (<75%)' : 'ALL',
       title: payload.title.trim(),
@@ -1771,386 +1658,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return { ok: true };
   };
 
-  useEffect(() => {
-    if (user?.collegeId && state.colleges.some((c) => c.id === user.collegeId) && state.activeCollegeId !== user.collegeId) {
-      setState((prev) => ({ ...prev, activeCollegeId: user.collegeId! }));
-    }
-  }, [user?.collegeId, state.colleges, state.activeCollegeId]);
-
-  const setActiveCollegeId = (collegeId: string) => {
-    setState((prev) => ({ ...prev, activeCollegeId: collegeId }));
-  };
-
-  const enrollCollegeInstitution = (payload: {
-    code: string;
-    name: string;
-    city: string;
-    adminName: string;
-    adminEmail: string;
-    departments: string[];
-  }) => {
-    const cleanCode = payload.code.trim().toUpperCase();
-    if (!cleanCode || !payload.name.trim() || !payload.adminEmail.includes('@')) {
-      return { ok: false, error: 'College code, name, and valid admin email are required.' };
-    }
-    if (state.colleges.some((c) => c.code.toUpperCase() === cleanCode)) {
-      return { ok: false, error: `College code ${cleanCode} is already enrolled.` };
-    }
-    const newCollege: CollegeInstitution = {
-      id: `clg-${cleanCode.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${Date.now().toString().slice(-4)}`,
-      code: cleanCode,
-      name: payload.name.trim(),
-      city: payload.city.trim() || 'India',
-      campusLat: 13.0108,
-      campusLng: 80.2354,
-      campusRadiusMeters: 850,
-      adminName: payload.adminName.trim() || 'College Admin',
-      adminEmail: payload.adminEmail.trim().toLowerCase(),
-      departments:
-        payload.departments.length > 0 ? payload.departments : ['CSE', 'AI&DS', 'ECE', 'IT'],
-      createdAt: new Date().toISOString(),
-    };
-
-    const welcomeNotif: AppNotification = {
-      id: `notif-clg-${Date.now()}`,
-      collegeId: newCollege.id,
-      title: `Welcome ${newCollege.name} (${newCollege.code})`,
-      message: `Your institution has been enrolled with isolated announcements, roll call, and campus social hub.`,
-      category: 'ANNOUNCEMENT',
-      imageUrl: 'assets/characters/captain-campus.jpg',
-      read: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    setState((prev) => ({
-      ...prev,
-      colleges: [newCollege, ...prev.colleges],
-      activeCollegeId: newCollege.id,
-      notifications: [welcomeNotif, ...prev.notifications],
-    }));
-    showToast(`Enrolled ${newCollege.name} (${newCollege.code})!`, 'success');
-    return { ok: true, college: newCollege };
-  };
-
-  const addTeacherRecord = (payload: {
-    fullName: string;
-    facultyId: string;
-    email: string;
-    phone: string;
-    gender: GenderCategory;
-    department: string;
-    designation: string;
-    cabinLocation: string;
-    assignedSubjectCodes: string[];
-    researchAreas: string[];
-    officeHours: string;
-  }) => {
-    if (!user || (user.role !== 'ADMIN' && user.role !== 'FACULTY')) {
-      return { ok: false, error: 'Only Admin or Faculty can add teachers to the college directory.' };
-    }
-    if (!payload.fullName.trim() || !payload.facultyId.trim()) {
-      return { ok: false, error: 'Teacher name and Faculty ID are required.' };
-    }
-    const newTeacher: TeacherDirectoryRecord = {
-      id: `tch-${Date.now()}`,
-      collegeId: user.collegeId || state.activeCollegeId,
-      fullName: payload.fullName.trim(),
-      facultyId: payload.facultyId.trim().toUpperCase(),
-      email: payload.email.trim(),
-      phone: payload.phone.trim(),
-      gender: payload.gender,
-      department: payload.department.trim() || 'CSE',
-      designation: payload.designation.trim() || 'Assistant Professor',
-      cabinLocation: payload.cabinLocation.trim() || 'Academic Block',
-      assignedSubjectCodes: payload.assignedSubjectCodes.map((c) => c.trim().toUpperCase()).filter(Boolean),
-      researchAreas: payload.researchAreas.filter(Boolean),
-      officeHours: payload.officeHours.trim() || 'Mon–Fri • 2:00 PM – 4:00 PM',
-      privacyShowLocation: true,
-      location: {
-        optedIn: true,
-        zoneLabel: payload.cabinLocation.trim() || 'Faculty Wing',
-        onCampus: true,
-        updatedAt: new Date().toISOString(),
-      },
-    };
-    setState((prev) => ({
-      ...prev,
-      teachers: [newTeacher, ...prev.teachers],
-    }));
-    showToast(`Added ${newTeacher.fullName} to Teacher Directory!`, 'success');
-    return { ok: true };
-  };
-
-  const submitMorningCheckIn = (
-    status: 'COMING' | 'NOT_COMING' | 'LATE',
-    reason?: string,
-    location?: LocationTrackingInfo
-  ) => {
-    if (!user) return { ok: false, lowAttendanceWarned: false };
-    const todayIso = toLocalDateIso();
-    const overallPct = overallSummary.overallEval.exactPercentage;
-    const hasLowSubject = overallSummary.atRiskCount > 0 || overallPct < 75;
-    const lowAttendanceWarned = hasLowSubject && status === 'NOT_COMING';
-
-    const entry: MorningCheckInResponse = {
-      id: `mci-${Date.now()}`,
-      date: todayIso,
-      studentId: user.id,
-      studentName: user.fullName,
-      registerNumber: user.registerNumber,
-      collegeId: user.collegeId || state.activeCollegeId,
-      department: user.department,
-      yearOfStudy: user.yearOfStudy || Math.max(1, Math.min(4, Math.ceil((user.semesterNumber || 5) / 2))),
-      gender: user.gender || 'OTHER',
-      status,
-      reason: reason?.trim(),
-      lowAttendanceWarned: hasLowSubject,
-      overallPercentage: overallPct,
-      location: user.privacyLocationOptIn ? location : undefined,
-      createdAt: new Date().toISOString(),
-    };
-
-    const extraNotifications: AppNotification[] = [];
-    if (lowAttendanceWarned) {
-      extraNotifications.push({
-        id: `notif-mci-warn-${Date.now()}`,
-        collegeId: entry.collegeId,
-        title: 'Urgent Morning Advisory: Low Attendance (< 75%)',
-        message: `You marked "Not Coming", but your attendance is ${overallPct.toFixed(2)}% with ${overallSummary.atRiskCount} at-risk subject(s). Try attending today to avoid Thanos Detention!`,
-        category: 'WARNING',
-        imageUrl: 'assets/characters/thanos-admin.jpg',
-        read: false,
-        createdAt: new Date().toISOString(),
-      });
-    }
-
-    setState((prev) => ({
-      ...prev,
-      morningCheckIns: [entry, ...prev.morningCheckIns.filter((m) => !(m.studentId === user.id && m.date === todayIso))],
-      notifications: [...extraNotifications, ...prev.notifications],
-    }));
-
-    showToast(
-      lowAttendanceWarned
-        ? 'Check-in saved — WARNING: Your attendance is low, we strongly advise coming today!'
-        : `Morning check-in saved: ${status === 'COMING' ? 'Attending Today' : status === 'LATE' ? 'Arriving Late' : 'Absent Today'}`,
-      lowAttendanceWarned ? 'info' : 'success'
-    );
-    return { ok: true, lowAttendanceWarned };
-  };
-
-  const updateStudentLocation = (location: LocationTrackingInfo) => {
-    if (!user) return;
-    updateUserProfile({ privacyLocationOptIn: location.optedIn });
-    setState((prev) => ({
-      ...prev,
-      demoCohort: prev.demoCohort.map((st) =>
-        st.id === user.id
-          ? { ...st, privacyShowLocation: location.optedIn, location }
-          : st
-      ),
-      morningCheckIns: prev.morningCheckIns.map((m) =>
-        m.studentId === user.id && m.date === toLocalDateIso()
-          ? { ...m, location: location.optedIn ? location : undefined }
-          : m
-      ),
-    }));
-    showToast(
-      location.optedIn ? `Live Campus Zone updated: ${location.zoneLabel}` : 'Location sharing paused for privacy.',
-      'success'
-    );
-  };
-
-  const updateMyPrivacyAndDetails = (updates: {
-    privacyLocationOptIn?: boolean;
-    privacyShowDirectory?: boolean;
-    privacyGirlsOnlyConnect?: boolean;
-    gender?: GenderCategory;
-    phone?: string;
-    skills?: string[];
-    yearOfStudy?: number;
-  }) => {
-    if (!user) return;
-    updateUserProfile(updates);
-    setState((prev) => ({
-      ...prev,
-      demoCohort: prev.demoCohort.map((st) =>
-        st.id === user.id
-          ? {
-              ...st,
-              privacyShowLocation: updates.privacyLocationOptIn ?? st.privacyShowLocation,
-              privacyShowProfile: updates.privacyShowDirectory ?? st.privacyShowProfile,
-              gender: updates.gender ?? st.gender,
-              phone: updates.phone ?? st.phone,
-              skills: updates.skills ?? st.skills,
-              yearOfStudy: updates.yearOfStudy ?? st.yearOfStudy,
-            }
-          : st
-      ),
-    }));
-    showToast('Privacy & profile details saved!', 'success');
-  };
-
-  const createHackathonPost = (payload: {
-    title: string;
-    ideaSummary: string;
-    domain: string;
-    neededRoles: string[];
-    techStack: string[];
-    teamSizeMax: number;
-    deadline: string;
-    prizeOrEvent: string;
-  }) => {
-    if (!user) return { ok: false, error: 'Sign in required.' };
-    if (!payload.title.trim() || !payload.ideaSummary.trim()) {
-      return { ok: false, error: 'Project title and idea summary are required.' };
-    }
-    const post: HackathonPost = {
-      id: `hack-${Date.now()}`,
-      collegeId: user.collegeId || state.activeCollegeId,
-      creatorId: user.id,
-      creatorName: user.fullName,
-      creatorDept: user.department || 'CSE',
-      creatorYear: user.yearOfStudy || 3,
-      creatorGender: user.gender || 'OTHER',
-      title: payload.title.trim(),
-      ideaSummary: payload.ideaSummary.trim(),
-      domain: payload.domain.trim() || 'AI & Web',
-      neededRoles: payload.neededRoles.filter(Boolean),
-      techStack: payload.techStack.filter(Boolean),
-      teamSizeMax: Math.max(2, Math.min(8, payload.teamSizeMax || 4)),
-      currentMembers: 1,
-      deadline: payload.deadline || toLocalDateIso(),
-      prizeOrEvent: payload.prizeOrEvent.trim() || 'College / Inter-College Hackathon',
-      status: 'OPEN',
-      applicants: [],
-      createdAt: new Date().toISOString(),
-    };
-    setState((prev) => ({
-      ...prev,
-      hackathons: [post, ...prev.hackathons],
-    }));
-    showToast(`Hackathon pitch "${post.title}" published!`, 'success');
-    return { ok: true };
-  };
-
-  const applyToHackathon = (hackathonId: string, pitch: string, skills: string) => {
-    if (!user) return { ok: false, error: 'Sign in required.' };
-    const target = state.hackathons.find((h) => h.id === hackathonId);
-    if (!target) return { ok: false, error: 'Hackathon project not found.' };
-    if (target.applicants.some((a) => a.applicantId === user.id)) {
-      return { ok: false, error: 'You have already applied to this team!' };
-    }
-    const applicant = {
-      id: `app-${Date.now()}`,
-      applicantId: user.id,
-      applicantName: user.fullName,
-      department: user.department || 'CSE',
-      yearOfStudy: user.yearOfStudy || 3,
-      skills: skills.trim() || (user.skills || ['React']).join(', '),
-      pitch: pitch.trim() || 'Excited to collaborate on this hackathon idea!',
-      status: 'PENDING' as const,
-      appliedAt: new Date().toISOString(),
-    };
-    setState((prev) => ({
-      ...prev,
-      hackathons: prev.hackathons.map((h) =>
-        h.id === hackathonId ? { ...h, applicants: [applicant, ...h.applicants] } : h
-      ),
-    }));
-    showToast(`Applied to "${target.title}"!`, 'success');
-    return { ok: true };
-  };
-
-  const reviewHackathonApplicant = (hackathonId: string, applicantId: string, decision: 'ACCEPTED' | 'DECLINED') => {
-    setState((prev) => ({
-      ...prev,
-      hackathons: prev.hackathons.map((h) => {
-        if (h.id !== hackathonId) return h;
-        const nextApplicants = h.applicants.map((a) => (a.id === applicantId ? { ...a, status: decision } : a));
-        const acceptedCount = nextApplicants.filter((a) => a.status === 'ACCEPTED').length;
-        return {
-          ...h,
-          applicants: nextApplicants,
-          currentMembers: Math.min(h.teamSizeMax, 1 + acceptedCount),
-        };
-      }),
-    }));
-    showToast(`Applicant ${decision.toLowerCase()}!`, 'success');
-  };
-
-  const createCampusPost = (payload: {
-    postType: CampusMediaPost['postType'];
-    caption: string;
-    tags: string[];
-    mediaUrl?: string;
-  }) => {
-    if (!user) return { ok: false, error: 'Sign in required.' };
-    if (!payload.caption.trim()) return { ok: false, error: 'Write a caption or update first.' };
-    const newPost: CampusMediaPost = {
-      id: `post-${Date.now()}`,
-      collegeId: user.collegeId || state.activeCollegeId,
-      authorId: user.id,
-      authorName: user.fullName,
-      authorAlias: user.heroAlias,
-      authorRole: user.role,
-      authorDept: user.department || 'CSE',
-      authorYear: user.yearOfStudy || 3,
-      authorGender: user.gender || 'OTHER',
-      postType: payload.postType,
-      caption: payload.caption.trim(),
-      tags: payload.tags.filter(Boolean),
-      mediaUrl: payload.mediaUrl?.trim() || undefined,
-      likes: [],
-      comments: [],
-      createdAt: new Date().toISOString(),
-    };
-    setState((prev) => ({
-      ...prev,
-      campusPosts: [newPost, ...prev.campusPosts],
-    }));
-    showToast(`${payload.postType} shared with your college feed!`, 'success');
-    return { ok: true };
-  };
-
-  const toggleLikeCampusPost = (postId: string) => {
-    if (!user) return;
-    setState((prev) => ({
-      ...prev,
-      campusPosts: prev.campusPosts.map((p) => {
-        if (p.id !== postId) return p;
-        const liked = p.likes.includes(user.id);
-        return {
-          ...p,
-          likes: liked ? p.likes.filter((id) => id !== user.id) : [...p.likes, user.id],
-        };
-      }),
-    }));
-  };
-
-  const addCommentCampusPost = (postId: string, text: string) => {
-    if (!user || !text.trim()) return;
-    setState((prev) => ({
-      ...prev,
-      campusPosts: prev.campusPosts.map((p) =>
-        p.id === postId
-          ? {
-              ...p,
-              comments: [
-                ...p.comments,
-                {
-                  id: `cmt-${Date.now()}`,
-                  authorName: user.fullName,
-                  text: text.trim(),
-                  createdAt: new Date().toISOString(),
-                },
-              ],
-            }
-          : p
-      ),
-    }));
-  };
-
   const resetDemoState = () => {
     localStorage.removeItem(STATE_KEY);
     localStorage.removeItem('ag_demo_student_profile_v1');
@@ -2169,38 +1676,20 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       auditLogs: INITIAL_AUDIT_LOGS,
       thanosAlerts: INITIAL_THANOS_ALERTS,
       demoCohort: INITIAL_DEMO_COHORT,
-      colleges: INITIAL_COLLEGES,
-      activeCollegeId: INITIAL_COLLEGES[0].id,
-      teachers: INITIAL_TEACHERS,
-      morningCheckIns: INITIAL_MORNING_CHECKINS,
-      hackathons: INITIAL_HACKATHONS,
-      campusPosts: INITIAL_CAMPUS_POSTS,
       preferences: DEFAULT_PREFERENCES,
       featureControls: DEFAULT_FEATURE_CONTROLS,
     });
   };
 
-  const scopedCollegeId = user?.collegeId || state.activeCollegeId;
-  const scopedAnnouncements = useMemo(
-    () => state.announcements.filter((a) => !a.collegeId || a.collegeId === scopedCollegeId),
-    [state.announcements, scopedCollegeId]
-  );
-  const scopedNotifications = useMemo(
-    () => state.notifications.filter((n) => !n.collegeId || n.collegeId === scopedCollegeId),
-    [state.notifications, scopedCollegeId]
-  );
-
   const unreadNotificationCount = useMemo(
-    () => scopedNotifications.filter((n) => !n.read).length,
-    [scopedNotifications]
+    () => state.notifications.filter((n) => !n.read).length,
+    [state.notifications]
   );
 
   return (
     <AppStateContext.Provider
       value={{
         ...state,
-        announcements: scopedAnnouncements,
-        notifications: scopedNotifications,
         heroMood,
         heroMessage,
         activeThanosModal,
@@ -2247,18 +1736,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         updateFeatureControls,
         adminAddStudent,
         adminBroadcastNotification,
-        setActiveCollegeId,
-        enrollCollegeInstitution,
-        addTeacherRecord,
-        submitMorningCheckIn,
-        updateStudentLocation,
-        updateMyPrivacyAndDetails,
-        createHackathonPost,
-        applyToHackathon,
-        reviewHackathonApplicant,
-        createCampusPost,
-        toggleLikeCampusPost,
-        addCommentCampusPost,
         updatePreferences,
         resetDemoState,
       }}

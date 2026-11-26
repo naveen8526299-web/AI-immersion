@@ -70,28 +70,6 @@ export const HEROES: Record<HeroId, HeroMetadata> = {
     badgeText: 'BUNK-SENSE',
     personality: 'Energetic, humorous, hyper-alert to sudden attendance drops.',
   },
-  'nova-forge': {
-    id: 'nova-forge',
-    name: 'NovaForge',
-    roleTitle: 'Hackathon & Build Architect',
-    tagline: 'Connecting builders across departments for winning prototypes',
-    primaryColor: '#10b981',
-    secondaryColor: '#ffc857',
-    accentClass: 'from-amber-400 via-emerald-500 to-cyan-500',
-    badgeText: 'HACKATHON FORGE',
-    personality: 'Creative, collaborative, obsessed with pairing ideas with the right teammates.',
-  },
-  'dawn-wing': {
-    id: 'dawn-wing',
-    name: 'DawnWing',
-    roleTitle: 'Morning Scout & Campus Safety',
-    tagline: 'First morning check-in guardian & safe transit beacon',
-    primaryColor: '#00d9ff',
-    secondaryColor: '#ff4d8d',
-    accentClass: 'from-cyan-400 via-pink-500 to-violet-600',
-    badgeText: 'MORNING SCOUT',
-    personality: 'Supportive, punctual, alerts low-attendance students every morning.',
-  },
 };
 
 interface DialogueContext {
@@ -300,101 +278,9 @@ export function getHeroDialogue(
         mood: 'happy',
       },
     },
-    'nova-forge': {
-      WELCOME: {
-        text: `Hackathon Forge online, ${name}! Attendance at ${pct}—keep your classes green while we build championship projects!`,
-        mood: 'happy',
-      },
-      ATTENDANCE_INCREASE: {
-        text: `Build streak upgraded! ${subj} hits ${pct}—more time to focus on your SIH prototype!`,
-        mood: 'happy',
-      },
-      PERFECT_100: {
-        text: `100% reliability in ${subj}! Pure Gold Shield engineering!`,
-        mood: 'celebration',
-      },
-      SAFE_85: {
-        text: `${subj} is solid at ${pct} (${safe} safe skip buffer) for your upcoming hackathon sprint.`,
-        mood: 'happy',
-      },
-      BORDERLINE_78: {
-        text: `${subj} is tightening at ${pct}—grab an OD request if you're attending a tech symposium!`,
-        mood: 'worried',
-      },
-      RISKY_BUNK_ATTEMPT: {
-        text: `Prototype alert! Skipping ${subj} drops you to ${pct}. Protect your hall ticket first!`,
-        mood: 'warning',
-      },
-      BELOW_75: {
-        text: `${subj} is at ${pct}. Complete ${rec} straight lectures to unlock full innovation focus!`,
-        mood: 'sad',
-      },
-      RECOVERY_PROGRESS: {
-        text: `Recovering fast! ${subj} climbed to ${pct} (${rec} remaining).`,
-        mood: 'celebration',
-      },
-      OD_APPROVED: {
-        text: `Official On-Duty Hackathon credit merged! ${subj} jumps to ${pct}!`,
-        mood: 'celebration',
-      },
-      TASK_COMPLETE: {
-        text: `Milestone shipped! Vault coins & XP upgraded!`,
-        mood: 'happy',
-      },
-      SIMULATION_SAFE: {
-        text: `Simulated hackathon schedule keeps ${subj} green at ${pct}!`,
-        mood: 'happy',
-      },
-    },
-    'dawn-wing': {
-      WELCOME: {
-        text: `Good morning ${name}! Overall attendance is ${pct}. Let's confirm today's check-in and stay on track!`,
-        mood: 'happy',
-      },
-      ATTENDANCE_INCREASE: {
-        text: `Present & accounted for! ${subj} is now ${pct}!`,
-        mood: 'happy',
-      },
-      PERFECT_100: {
-        text: `100% Morning Shield in ${subj}! Radiant campus consistency!`,
-        mood: 'celebration',
-      },
-      SAFE_85: {
-        text: `All clear for ${subj} at ${pct}—${safe} safe skip(s) available if needed.`,
-        mood: 'happy',
-      },
-      BORDERLINE_78: {
-        text: `Heads up! ${subj} is at ${pct}. Coming to college today keeps your margin safe!`,
-        mood: 'worried',
-      },
-      RISKY_BUNK_ATTEMPT: {
-        text: `Morning Scout Warning: skipping ${subj} drops you to ${pct}! Better attend today!`,
-        mood: 'warning',
-      },
-      BELOW_75: {
-        text: `Low attendance alert on ${subj} (${pct})! You should attend today—${rec} straight classes needed!`,
-        mood: 'sad',
-      },
-      RECOVERY_PROGRESS: {
-        text: `Great morning effort! ${subj} improved to ${pct} (${rec} more to 75%).`,
-        mood: 'celebration',
-      },
-      OD_APPROVED: {
-        text: `OD verified and credited! ${subj} stands at ${pct}.`,
-        mood: 'celebration',
-      },
-      TASK_COMPLETE: {
-        text: `Morning checklist completed! Bonus XP awarded!`,
-        mood: 'happy',
-      },
-      SIMULATION_SAFE: {
-        text: `Plan checks out—${subj} holds steady at ${pct}!`,
-        mood: 'happy',
-      },
-    },
   };
 
-  return (libraries[heroId] || libraries['captain-campus'])[event];
+  return libraries[heroId][event];
 }
 
 export const THANOS_QUOTES = [

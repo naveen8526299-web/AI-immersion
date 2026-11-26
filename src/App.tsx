@@ -12,15 +12,10 @@ import { FeatureControlFlags, UserRole } from './types';
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 const ArmoryPage = lazy(() => import('./pages/ArmoryPage').then((m) => ({ default: m.ArmoryPage })));
 const AttendancePage = lazy(() => import('./pages/AttendancePage').then((m) => ({ default: m.AttendancePage })));
-const CampusHubPage = lazy(() => import('./pages/CampusHubPage').then((m) => ({ default: m.CampusHubPage })));
 const DashboardPage = lazy(() => import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage })));
 const FacultyPage = lazy(() => import('./pages/FacultyPage').then((m) => ({ default: m.FacultyPage })));
-const HackathonHubPage = lazy(() =>
-  import('./pages/HackathonHubPage').then((m) => ({ default: m.HackathonHubPage }))
-);
 const HeroesPage = lazy(() => import('./pages/HeroesPage').then((m) => ({ default: m.HeroesPage })));
 const InsightsPage = lazy(() => import('./pages/InsightsPage').then((m) => ({ default: m.InsightsPage })));
-const LiveRadarPage = lazy(() => import('./pages/LiveRadarPage').then((m) => ({ default: m.LiveRadarPage })));
 const NotificationsPage = lazy(() =>
   import('./pages/NotificationsPage').then((m) => ({ default: m.NotificationsPage }))
 );
@@ -147,30 +142,6 @@ export function App() {
                     element={
                       <ProtectedRoute allowedRoles={['STUDENT']} requiredFeature="allowSquadConnect">
                         <SquadPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/campus-hub"
-                    element={
-                      <ProtectedRoute requiredFeature="allowCampusSocialFeed">
-                        <CampusHubPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/hackathons"
-                    element={
-                      <ProtectedRoute requiredFeature="allowHackathonTeamFinder">
-                        <HackathonHubPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/live-radar"
-                    element={
-                      <ProtectedRoute requiredFeature="allowLiveLocationCheckIn">
-                        <LiveRadarPage />
                       </ProtectedRoute>
                     }
                   />

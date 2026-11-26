@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { DEMO_ACCOUNTS } from '../services/demoData';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
-import { GenderCategory, HeroId, UserProfile, UserRole } from '../types';
+import { HeroId, UserProfile, UserRole } from '../types';
 
 interface AuthContextValue {
   user: UserProfile | null;
@@ -18,12 +18,6 @@ interface AuthContextValue {
     registerNumber: string;
     semesterNumber: number;
     selectedHero: HeroId;
-    collegeId?: string;
-    collegeName?: string;
-    gender?: GenderCategory;
-    yearOfStudy?: number;
-    phone?: string;
-    skills?: string[];
   }) => Promise<{ ok: boolean; error?: string }>;
   registerFaculty: (payload: {
     fullName: string;
@@ -32,18 +26,6 @@ interface AuthContextValue {
     department: string;
     facultyId: string;
     assignedSubjectCodes: string[];
-    collegeId?: string;
-    collegeName?: string;
-    gender?: GenderCategory;
-    phone?: string;
-  }) => Promise<{ ok: boolean; error?: string }>;
-  registerCollegeAdmin: (payload: {
-    fullName: string;
-    email: string;
-    password: string;
-    collegeId: string;
-    collegeName: string;
-    adminCode?: string;
   }) => Promise<{ ok: boolean; error?: string }>;
   updateUserProfile: (updates: Partial<UserProfile>) => void;
   logout: () => Promise<void>;
@@ -175,12 +157,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     registerNumber: string;
     semesterNumber: number;
     selectedHero: HeroId;
-    collegeId?: string;
-    collegeName?: string;
-    gender?: GenderCategory;
-    yearOfStudy?: number;
-    phone?: string;
-    skills?: string[];
   }): Promise<{ ok: boolean; error?: string }> => {
     const email = payload.email.trim().toLowerCase();
     if (!payload.fullName.trim() || !email.includes('@') || payload.password.length < 6) {
@@ -231,14 +207,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       fullName: payload.fullName.trim(),
       heroAlias: payload.heroAlias.trim() || 'CampusGuardian',
       role: 'STUDENT',
-      department: payload.department || 'CSE',
+      department: payload.department || 'Computer Science & Engineering',
       semesterNumber: payload.semesterNumber || 5,
-      yearOfStudy: payload.yearOfStudy || Math.max(1, Math.min(4, Math.ceil((payload.semesterNumber || 5) / 2))),
-      gender: payload.gender || 'OTHER',
-      phone: payload.phone?.trim() || '',
-      skills: payload.skills && payload.skills.length > 0 ? payload.skills : ['React', 'Python'],
-      collegeId: payload.collegeId || 'clg-au-coe',
-      collegeName: payload.collegeName || 'Anna University CoE Campus',
       registerNumber: payload.registerNumber || `22CSE${Math.floor(100 + Math.random() * 899)}`,
       selectedHero: payload.selectedHero,
       unlockedAuras: ['default-spark'],
@@ -250,10 +220,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       lastAttendanceDate: null,
       classesAttendedToday: 0,
       squadPrivacyShowExact: false,
-      anonymizeInPublicLists: false,
-      privacyLocationOptIn: false,
-      privacyShowDirectory: true,
-      privacyGirlsOnlyConnect: false,
+      anonymizeInPublicLists: true,
       isDemo: true,
     };
 
@@ -280,10 +247,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     department: string;
     facultyId: string;
     assignedSubjectCodes: string[];
-    collegeId?: string;
-    collegeName?: string;
-    gender?: GenderCategory;
-    phone?: string;
   }): Promise<{ ok: boolean; error?: string }> => {
     const email = payload.email.trim().toLowerCase();
     const cleanedCodes = Array.from(
@@ -334,15 +297,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       fullName: payload.fullName.trim(),
       heroAlias: payload.fullName.trim(),
       role: 'FACULTY',
-      department: payload.department || 'CSE',
-      gender: payload.gender || 'OTHER',
-      phone: payload.phone?.trim() || '',
-      collegeId: payload.collegeId || 'clg-au-coe',
-      collegeName: payload.collegeName || 'Anna University CoE Campus',
+      department: payload.department || 'Computer Science & Engineering',
       registerNumber: payload.facultyId.trim() || `FAC-${Math.floor(100 + Math.random() * 899)}`,
       assignedSubjectCodes: cleanedCodes,
-      privacyLocationOptIn: false,
-      privacyShowDirectory: true,
       isDemo: true,
     };
 
@@ -359,79 +316,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setUser(newFaculty);
-    return { ok: true };
-  };
-
-  const registerCollegeAdmin = async (payload: {
-    fullName: string;
-    email: string;
-    password: string;
-    collegeId: string;
-    collegeName: string;
-    adminCode?: string;
-  }): Promise<{ ok: boolean; error?: string }> => {
-    const email = payload.email.trim().toLowerCase();
-    if (!payload.fullName.trim() || !email.includes('@') || payload.password.length < 6) {
-      return { ok: false, error: 'Enter admin name, valid email, and password (min 6 chars).' };
-    }
-    if (isSupabaseConfigured && supabase) {
-      setLoading(true);
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password: payload.password,
-        options: {
-          data: {
-            fullName: payload.fullName.trim(),
-            role: 'ADMIN',
-            collegeId: payload.collegeId,
-            collegeName: payload.collegeName,
-          },
-        },
-      });
-      setLoading(false);
-      if (error || !data.user) {
-        return { ok: false, error: error?.message || 'College Admin registration failed.' };
-      }
-      setUser({
-        ...DEMO_ACCOUNTS.ADMIN,
-        id: data.user.id,
-        email,
-        fullName: payload.fullName.trim(),
-        heroAlias: `${payload.collegeName} Command`,
-        collegeId: payload.collegeId,
-        collegeName: payload.collegeName,
-        registerNumber: payload.adminCode?.trim() || 'ADM-CLG',
-        isDemo: false,
-      });
-      return { ok: true };
-    }
-
-    const newAdmin: UserProfile = {
-      ...DEMO_ACCOUNTS.ADMIN,
-      id: `demo-admin-${Date.now()}`,
-      email,
-      fullName: payload.fullName.trim(),
-      heroAlias: `${payload.collegeName} Command`,
-      role: 'ADMIN',
-      collegeId: payload.collegeId,
-      collegeName: payload.collegeName,
-      registerNumber: payload.adminCode?.trim() || `ADM-${Math.floor(100 + Math.random() * 899)}`,
-      isDemo: true,
-    };
-
-    try {
-      const storedRaw = localStorage.getItem(REGISTERED_DEMO_USERS_KEY);
-      const storedUsers: Array<UserProfile & { passwordHash: string }> = storedRaw ? JSON.parse(storedRaw) : [];
-      if (storedUsers.some((u) => u.email.toLowerCase() === email)) {
-        return { ok: false, error: 'An account with this email already exists.' };
-      }
-      storedUsers.push({ ...newAdmin, passwordHash: btoa(payload.password) });
-      localStorage.setItem(REGISTERED_DEMO_USERS_KEY, JSON.stringify(storedUsers));
-    } catch {
-      // ignore
-    }
-
-    setUser(newAdmin);
     return { ok: true };
   };
 
@@ -463,7 +347,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         loginWithEmail,
         registerStudent,
         registerFaculty,
-        registerCollegeAdmin,
         updateUserProfile,
         logout,
       }}
