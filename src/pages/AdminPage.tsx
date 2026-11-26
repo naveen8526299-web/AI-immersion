@@ -1,15 +1,29 @@
 import React, { useMemo, useState } from 'react';
-import { Building2, Download, Eye, EyeOff, FileText, Info, Search, ShieldCheck, Sliders } from 'lucide-react';
+import {
+  Building2,
+  ChevronRight,
+  Download,
+  Eye,
+  EyeOff,
+  FileText,
+  Info,
+  KeyRound,
+  Search,
+  ShieldCheck,
+  Sliders,
+  X,
+} from 'lucide-react';
 import { useAppState } from '../contexts/AppStateContext';
 import { useAuth } from '../contexts/AuthContext';
-import { evaluateOverallSubjects } from '../utils/attendanceMath';
+import { evaluateAttendance, evaluateOverallSubjects } from '../utils/attendanceMath';
 
 export const AdminPage: React.FC = () => {
   const { user } = useAuth();
   const { subjects, demoCohort, odRequests, auditLogs, semester, updateSemester, reviewODRequest } = useAppState();
 
   const [search, setSearch] = useState('');
-  const [anonymizeView, setAnonymizeView] = useState(true);
+  const [anonymizeView, setAnonymizeView] = useState(false);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   const allStudents = useMemo(
     () => [
@@ -36,6 +50,11 @@ export const AdminPage: React.FC = () => {
       s.registerNumber.toLowerCase().includes(q)
     );
   });
+
+  const selectedStudent = useMemo(
+    () => allStudents.find((s) => s.id === selectedStudentId) || null,
+    [allStudents, selectedStudentId]
+  );
 
   if (!user || user.role !== 'ADMIN') return null;
 
@@ -150,20 +169,21 @@ export const AdminPage: React.FC = () => {
                 <th className="py-2 pr-3">Department</th>
                 <th className="py-2 pr-3">Overall %</th>
                 <th className="py-2 pr-3">At-Risk Subjects</th>
-                <th className="py-2">Eligibility</th>
+                <th className="py-2 pr-3">Eligibility</th>
+                <th className="py-2">Details</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200/70 dark:divide-white/5">
               {filteredStudents.map((st) => {
                 const sum = evaluateOverallSubjects(st.subjects);
                 return (
-                  <tr key={st.id}>
+                  <tr key={st.id} className="hover:bg-slate-100/50 dark:hover:bg-white/5 transition">
                     <td className="py-2.5 pr-3 font-bold">{anonymizeView ? st.heroAlias : st.fullName}</td>
                     <td className="py-2.5 pr-3 font-mono">{anonymizeView ? `ID-${st.registerNumber.slice(-3)}` : st.registerNumber}</td>
                     <td className="py-2.5 pr-3">{st.department}</td>
                     <td className="py-2.5 pr-3 font-mono font-bold">{sum.overallEval.displayPercentage}</td>
                     <td className="py-2.5 pr-3">{sum.atRiskCount}</td>
-                    <td className="py-2.5">
+                    <td className="py-2.5 pr-3">
                       <span
                         className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 font-bold ${
                           sum.atRiskCount === 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
@@ -172,12 +192,38 @@ export const AdminPage: React.FC = () => {
                         {sum.atRiskCount === 0 ? 'All Eligible' : 'Review Required'}
                       </span>
                     </td>
+                    <td className="py-2.5">
+                      <button
+                        onClick={() => setSelectedStudentId(st.id)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-[#00D9FF]/15 border border-[#00D9FF]/35 px-2.5 py-1 text-[11px] font-bold text-cyan-600 dark:text-[#00D9FF] hover:bg-[#00D9FF]/25 transition"
+                      >
+                        View Subjects <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
         </div>
+      </div>
+
+      {/* Admin Account Provisioning Guide */}
+      <div className="glass-card rounded-2xl p-5 space-y-2 text-xs">
+        <h2 className="font-display text-base font-bold flex items-center gap-2 text-[#FFC857]">
+          <KeyRound className="h-4 w-4" /> Creating a Real Institutional Admin Account (Supabase Production)
+        </h2>
+        <p className="text-slate-600 dark:text-slate-300">
+          For security, public sign-up on <code className="font-mono">/register</code> only creates <strong>STUDENT</strong> accounts. To promote a real college administrator in Supabase:
+        </p>
+        <pre className="rounded-xl bg-[#080817] border border-violet-400/25 p-3 font-mono text-[11px] text-[#00D9FF] overflow-x-auto">
+{`-- 1. Create the user in Supabase Auth (Dashboard -> Authentication -> Users -> Add User)
+-- 2. Run in Supabase SQL Editor to grant ADMIN role:
+INSERT INTO public.profiles (id, email, full_name, hero_alias, role)
+SELECT id, email, 'College Admin', 'AdminCommand', 'ADMIN'
+FROM auth.users WHERE email = 'admin@yourcollege.edu'
+ON CONFLICT (id) DO UPDATE SET role = 'ADMIN';`}
+        </pre>
       </div>
 
       {/* Pending OD Governance */}
@@ -240,6 +286,90 @@ export const AdminPage: React.FC = () => {
           ))}
         </div>
       </div>
+
+      {/* Student Subject-Wise Detail Modal */}
+      {selectedStudent && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          onClick={() => setSelectedStudentId(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-2xl rounded-3xl glass-card bg-white dark:bg-[#17152D] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#00D9FF]">
+                  Student Attendance Dossier
+                </span>
+                <h3 className="font-display text-xl font-extrabold mt-0.5">
+                  {anonymizeView ? selectedStudent.heroAlias : selectedStudent.fullName}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-300">
+                  Reg No:{' '}
+                  <span className="font-mono">
+                    {anonymizeView ? `ID-${selectedStudent.registerNumber.slice(-3)}` : selectedStudent.registerNumber}
+                  </span>{' '}
+                  • {selectedStudent.department} • Sem {selectedStudent.semesterNumber}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedStudentId(null)}
+                className="rounded-xl bg-white/10 p-2 hover:bg-white/20 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-white/10 text-slate-500 uppercase">
+                    <th className="py-2 pr-3">Code</th>
+                    <th className="py-2 pr-3">Subject</th>
+                    <th className="py-2 pr-3">Attended / Total</th>
+                    <th className="py-2 pr-3">Exact %</th>
+                    <th className="py-2 pr-3">Status</th>
+                    <th className="py-2">Margin / Recovery</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200/70 dark:divide-white/5">
+                  {selectedStudent.subjects.map((subj) => {
+                    const ev = evaluateAttendance(subj.attended, subj.total, subj.minPercentage);
+                    return (
+                      <tr key={subj.id}>
+                        <td className="py-2.5 pr-3 font-mono font-bold text-[#00D9FF]">{subj.code}</td>
+                        <td className="py-2.5 pr-3">
+                          <div className="font-semibold">{subj.name}</div>
+                          <div className="text-[11px] text-slate-400">{subj.facultyName}</div>
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono">
+                          {ev.attended} / {ev.total}
+                        </td>
+                        <td className="py-2.5 pr-3 font-mono font-bold">{ev.displayPercentage}</td>
+                        <td className="py-2.5 pr-3">
+                          <span
+                            className={`inline-flex whitespace-nowrap rounded-full px-2 py-0.5 font-bold ${
+                              ev.isEligible ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
+                            }`}
+                          >
+                            {ev.statusLabel}
+                          </span>
+                        </td>
+                        <td className="py-2.5 text-slate-500 dark:text-slate-300">
+                          {ev.isEligible
+                            ? `${ev.maxSafeAbsences} safe skip(s)`
+                            : `Attend ${ev.requiredRecoveryClasses} straight`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
