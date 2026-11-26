@@ -35,6 +35,7 @@ import {
   SquadTask,
   Subject,
   ThanosAlertRecord,
+  UserProfile,
 } from '../types';
 import { evaluateAttendance, evaluateOverallSubjects, isAttendanceEligible } from '../utils/attendanceMath';
 import { assetUrl } from '../utils/assetUrl';
@@ -53,6 +54,54 @@ import { predictHallTicketSurvival } from '../utils/survivalPredictor';
 import { useAuth } from './AuthContext';
 
 const STATE_KEY = 'ag_app_state_v1';
+const REGISTERED_DEMO_USERS_KEY = 'ag_demo_registered_users_v1';
+
+function mergeRegisteredStudentsIntoCohort(
+  cohort: DemoStudentRecord[],
+  templateSubjects: Subject[],
+  extraUser?: UserProfile | null
+): DemoStudentRecord[] {
+  const existingIds = new Set(cohort.map((s) => s.id));
+  const existingRegs = new Set(cohort.map((s) => s.registerNumber.trim().toUpperCase()));
+  const additions: DemoStudentRecord[] = [];
+
+  const candidates: Array<Partial<UserProfile>> = [];
+  try {
+    const raw = localStorage.getItem(REGISTERED_DEMO_USERS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Array<Partial<UserProfile>>;
+      if (Array.isArray(parsed)) candidates.push(...parsed);
+    }
+  } catch {
+    // ignore storage parse error
+  }
+  if (extraUser) candidates.push(extraUser);
+
+  for (const cand of candidates) {
+    if (cand.role !== 'STUDENT' || !cand.id || cand.id === 'demo-student-1') continue;
+    const regClean = (cand.registerNumber || `REG-${cand.id.slice(-4)}`).trim().toUpperCase();
+    if (existingIds.has(cand.id) || existingRegs.has(regClean)) continue;
+    existingIds.add(cand.id);
+    existingRegs.add(regClean);
+    additions.push({
+      id: cand.id,
+      fullName: cand.fullName?.trim() || 'Registered Student',
+      heroAlias: cand.heroAlias?.trim() || `Guard-${regClean.slice(-3)}`,
+      registerNumber: regClean,
+      department: cand.department?.trim() || 'CSE',
+      semesterNumber: cand.semesterNumber || 5,
+      subjects: templateSubjects.map((s, idx) => ({
+        ...s,
+        id: `${cand.id}-s${idx + 1}`,
+        studentId: cand.id as string,
+        attended: 0,
+        total: 0,
+      })),
+    });
+  }
+
+  return additions.length > 0 ? [...additions, ...cohort] : cohort;
+}
 
 interface PersistedState {
   subjects: Subject[];
@@ -77,8 +126,9 @@ function loadInitialState(): PersistedState {
     const raw = localStorage.getItem(STATE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      const baseSubjects = parsed.subjects ?? INITIAL_SUBJECTS;
       return {
-        subjects: parsed.subjects ?? INITIAL_SUBJECTS,
+        subjects: baseSubjects,
         records: parsed.records ?? INITIAL_RECORDS,
         semester: parsed.semester ?? INITIAL_SEMESTER,
         odRequests: parsed.odRequests ?? INITIAL_OD_REQUESTS,
@@ -90,7 +140,7 @@ function loadInitialState(): PersistedState {
         announcements: parsed.announcements ?? INITIAL_ANNOUNCEMENTS,
         auditLogs: parsed.auditLogs ?? INITIAL_AUDIT_LOGS,
         thanosAlerts: parsed.thanosAlerts ?? INITIAL_THANOS_ALERTS,
-        demoCohort: parsed.demoCohort ?? INITIAL_DEMO_COHORT,
+        demoCohort: mergeRegisteredStudentsIntoCohort(parsed.demoCohort ?? INITIAL_DEMO_COHORT, baseSubjects),
         preferences: parsed.preferences ? { ...DEFAULT_PREFERENCES, ...parsed.preferences } : DEFAULT_PREFERENCES,
         featureControls: parsed.featureControls
           ? { ...DEFAULT_FEATURE_CONTROLS, ...parsed.featureControls }
@@ -114,7 +164,7 @@ function loadInitialState(): PersistedState {
     announcements: INITIAL_ANNOUNCEMENTS,
     auditLogs: INITIAL_AUDIT_LOGS,
     thanosAlerts: INITIAL_THANOS_ALERTS,
-    demoCohort: INITIAL_DEMO_COHORT,
+    demoCohort: mergeRegisteredStudentsIntoCohort(INITIAL_DEMO_COHORT, INITIAL_SUBJECTS),
     preferences: DEFAULT_PREFERENCES,
     featureControls: DEFAULT_FEATURE_CONTROLS,
   };
@@ -238,6 +288,15 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     localStorage.setItem(STATE_KEY, JSON.stringify(state));
   }, [state]);
+
+  // Automatically include newly registered students (/register) in the college directory
+  useEffect(() => {
+    setState((prev) => {
+      const merged = mergeRegisteredStudentsIntoCohort(prev.demoCohort, prev.subjects, user);
+      if (merged === prev.demoCohort) return prev;
+      return { ...prev, demoCohort: merged };
+    });
+  }, [user]);
 
   const overallSummary = useMemo(() => evaluateOverallSubjects(state.subjects), [state.subjects]);
 

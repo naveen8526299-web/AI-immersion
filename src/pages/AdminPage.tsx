@@ -439,7 +439,14 @@ export const AdminPage: React.FC = () => {
       {/* Student Search & Eligibility Report */}
       <div className="glass-card rounded-2xl p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="font-display text-lg font-bold">Student Eligibility Reports</h2>
+          <div>
+            <h2 className="font-display text-lg font-bold">
+              Registered Students &amp; Eligibility Reports ({filteredStudents.length} / {allStudents.length})
+            </h2>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Includes preloaded cohort, Admin-enrolled students, and newly self-registered students. Click View Subjects to inspect or mark attendance.
+            </p>
+          </div>
           <div className="flex items-center gap-2">
             <div className="relative">
               <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-slate-400" />
