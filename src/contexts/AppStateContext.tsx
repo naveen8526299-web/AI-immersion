@@ -1,0 +1,1462 @@
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DEFAULT_PREFERENCES,
+  INITIAL_ACHIEVEMENTS,
+  INITIAL_ANNOUNCEMENTS,
+  INITIAL_AUDIT_LOGS,
+  INITIAL_DEMO_COHORT,
+  INITIAL_NOTIFICATIONS,
+  INITIAL_OD_REQUESTS,
+  INITIAL_RECORDS,
+  INITIAL_REWARDS,
+  INITIAL_SEMESTER,
+  INITIAL_SQUAD,
+  INITIAL_SUBJECTS,
+  INITIAL_TASKS,
+  INITIAL_THANOS_ALERTS,
+} from '../services/demoData';
+import {
+  AchievementBadge,
+  AppNotification,
+  AppPreferences,
+  AttendanceRecord,
+  AuditLogEntry,
+  DemoStudentRecord,
+  FacultyAnnouncement,
+  HeroId,
+  HeroMood,
+  ODEventType,
+  ODRequest,
+  RewardTransaction,
+  SemesterSettings,
+  Squad,
+  SquadTask,
+  Subject,
+  ThanosAlertRecord,
+} from '../types';
+import { evaluateAttendance, evaluateOverallSubjects, isAttendanceEligible } from '../utils/attendanceMath';
+import { assetUrl } from '../utils/assetUrl';
+import { toLocalDateIso } from '../utils/dateUtils';
+import { DialogueEvent, getHeroDialogue, pickThanosQuote } from '../utils/dialogueEngine';
+import {
+  HERO_AURAS,
+  REWARD_RULES,
+  computeSquadPrivacyTier,
+  evaluateAchievements,
+  getLevelInfo,
+  hasClaimedReward,
+} from '../utils/gamification';
+import { playCoinSound, playShieldUnlockSound, playThanosWarningSound, speakHeroLine } from '../utils/soundEngine';
+import { predictHallTicketSurvival } from '../utils/survivalPredictor';
+import { useAuth } from './AuthContext';
+
+const STATE_KEY = 'ag_app_state_v1';
+
+interface PersistedState {
+  subjects: Subject[];
+  records: AttendanceRecord[];
+  semester: SemesterSettings;
+  odRequests: ODRequest[];
+  squad: Squad | null;
+  tasks: SquadTask[];
+  rewards: RewardTransaction[];
+  achievements: AchievementBadge[];
+  notifications: AppNotification[];
+  announcements: FacultyAnnouncement[];
+  auditLogs: AuditLogEntry[];
+  thanosAlerts: ThanosAlertRecord[];
+  demoCohort: DemoStudentRecord[];
+  preferences: AppPreferences;
+}
+
+function loadInitialState(): PersistedState {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<PersistedState>;
+      return {
+        subjects: parsed.subjects ?? INITIAL_SUBJECTS,
+        records: parsed.records ?? INITIAL_RECORDS,
+        semester: parsed.semester ?? INITIAL_SEMESTER,
+        odRequests: parsed.odRequests ?? INITIAL_OD_REQUESTS,
+        squad: parsed.squad === undefined ? INITIAL_SQUAD : parsed.squad,
+        tasks: parsed.tasks ?? INITIAL_TASKS,
+        rewards: parsed.rewards ?? INITIAL_REWARDS,
+        achievements: parsed.achievements ?? INITIAL_ACHIEVEMENTS,
+        notifications: parsed.notifications ?? INITIAL_NOTIFICATIONS,
+        announcements: parsed.announcements ?? INITIAL_ANNOUNCEMENTS,
+        auditLogs: parsed.auditLogs ?? INITIAL_AUDIT_LOGS,
+        thanosAlerts: parsed.thanosAlerts ?? INITIAL_THANOS_ALERTS,
+        demoCohort: parsed.demoCohort ?? INITIAL_DEMO_COHORT,
+        preferences: parsed.preferences ? { ...DEFAULT_PREFERENCES, ...parsed.preferences } : DEFAULT_PREFERENCES,
+      };
+    }
+  } catch {
+    // fallback to defaults
+  }
+
+  return {
+    subjects: INITIAL_SUBJECTS,
+    records: INITIAL_RECORDS,
+    semester: INITIAL_SEMESTER,
+    odRequests: INITIAL_OD_REQUESTS,
+    squad: INITIAL_SQUAD,
+    tasks: INITIAL_TASKS,
+    rewards: INITIAL_REWARDS,
+    achievements: INITIAL_ACHIEVEMENTS,
+    notifications: INITIAL_NOTIFICATIONS,
+    announcements: INITIAL_ANNOUNCEMENTS,
+    auditLogs: INITIAL_AUDIT_LOGS,
+    thanosAlerts: INITIAL_THANOS_ALERTS,
+    demoCohort: INITIAL_DEMO_COHORT,
+    preferences: DEFAULT_PREFERENCES,
+  };
+}
+
+export interface ActiveThanosModal {
+  subjectCode: string;
+  subjectName: string;
+  percentage: number;
+  requiredPercentage: number;
+  recoveryNeeded: number;
+  quote: string;
+  isSimulation: boolean;
+}
+
+interface AppStateContextValue extends PersistedState {
+  heroMood: HeroMood;
+  heroMessage: string;
+  activeThanosModal: ActiveThanosModal | null;
+  levelUpBanner: { level: number; title: string } | null;
+  toastMessage: { text: string; tone: 'success' | 'info' } | null;
+  survivalSummary: ReturnType<typeof predictHallTicketSurvival>;
+  overallSummary: ReturnType<typeof evaluateOverallSubjects>;
+  unreadNotificationCount: number;
+  dismissThanosModal: () => void;
+  dismissLevelUpBanner: () => void;
+  showToast: (text: string, tone?: 'success' | 'info') => void;
+  dismissToast: () => void;
+  triggerHeroReaction: (event: DialogueEvent, ctx?: Parameters<typeof getHeroDialogue>[2], speak?: boolean) => void;
+  triggerThanosAlert: (payload: Omit<ActiveThanosModal, 'quote'>, force?: boolean) => void;
+  recordStudentAttendance: (subjectId: string, status: 'PRESENT' | 'ABSENT', note?: string) => void;
+  undoAttendanceRecord: (recordId: string) => { ok: boolean; error?: string };
+  addSubject: (subj: Omit<Subject, 'id' | 'studentId'>) => void;
+  updateSubject: (id: string, updates: Partial<Subject>) => void;
+  deleteSubject: (id: string) => void;
+  updateSemester: (updates: Partial<SemesterSettings>) => void;
+  startCleanSemester: (payload: {
+    semesterName: string;
+    startDate: string;
+    endDate: string;
+    examDate: string;
+    defaultMinPercentage: number;
+  }) => void;
+  exportBackupJson: () => string;
+  importBackupJson: (rawJson: string) => { ok: boolean; error?: string };
+  submitODRequest: (payload: {
+    eventName: string;
+    eventType: ODEventType;
+    startDate: string;
+    endDate: string;
+    subjectIds: string[];
+    periodsPerSubject: number;
+    documentNote: string;
+  }) => { ok: boolean; error?: string };
+  reviewODRequest: (odId: string, decision: 'APPROVED' | 'REJECTED', remarks: string) => { ok: boolean; error?: string };
+  facultyUpdateStudentAttendance: (payload: {
+    studentId: string;
+    subjectId: string;
+    newAttended: number;
+    newTotal: number;
+    reason: string;
+  }) => { ok: boolean; error?: string };
+  addAnnouncement: (subjectCode: string, title: string, message: string) => void;
+  createSquad: (name: string) => void;
+  joinSquadByCode: (code: string) => { ok: boolean; error?: string };
+  leaveSquad: () => void;
+  nudgeSquadMember: (memberId: string) => void;
+  addTask: (task: Omit<SquadTask, 'id' | 'rewardClaimed' | 'createdAt'>) => void;
+  updateTask: (id: string, updates: Partial<SquadTask>) => void;
+  deleteTask: (id: string) => void;
+  toggleTaskCompletion: (id: string) => void;
+  purchaseAura: (auraId: string) => { ok: boolean; error?: string };
+  equipAura: (auraId: string) => void;
+  selectHero: (heroId: HeroId) => void;
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
+  dismissNotification: (id: string) => void;
+  triggerDailyReminder: (force?: boolean) => void;
+  requestBrowserNotificationPermission: () => Promise<NotificationPermission | 'unsupported'>;
+  updatePreferences: (updates: Partial<AppPreferences>) => void;
+  resetDemoState: () => void;
+}
+
+const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
+
+export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user, updateUserProfile } = useAuth();
+  const [state, setState] = useState<PersistedState>(loadInitialState);
+  const [heroMood, setHeroMood] = useState<HeroMood>('happy');
+  const [heroMessage, setHeroMessage] = useState<string>(
+    'Suit up! Click any subject or open the Bunk Simulator to see live predictions.'
+  );
+  const [activeThanosModal, setActiveThanosModal] = useState<ActiveThanosModal | null>(null);
+  const [levelUpBanner, setLevelUpBanner] = useState<{ level: number; title: string } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ text: string; tone: 'success' | 'info' } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  const lastThanosTriggerKeyRef = useRef<string>('');
+
+  const showToast = useCallback((text: string, tone: 'success' | 'info' = 'success') => {
+    setToastMessage({ text, tone });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 3200);
+  }, []);
+
+  const dismissToast = useCallback(() => setToastMessage(null), []);
+
+  useEffect(() => {
+    localStorage.setItem(STATE_KEY, JSON.stringify(state));
+  }, [state]);
+
+  const overallSummary = useMemo(() => evaluateOverallSubjects(state.subjects), [state.subjects]);
+
+  const survivalSummary = useMemo(
+    () => predictHallTicketSurvival(state.subjects, state.semester, state.odRequests, state.tasks),
+    [state.subjects, state.semester, state.odRequests, state.tasks]
+  );
+
+  // Sync welcome hero line once user logs in or changes hero
+  useEffect(() => {
+    if (!user) return;
+    const dlg = getHeroDialogue(user.selectedHero, 'WELCOME', {
+      percentage: overallSummary.overallEval.exactPercentage,
+      daysUntilExam: survivalSummary.daysUntilExam,
+      studentName: user.heroAlias || user.fullName,
+    });
+    setHeroMood(dlg.mood);
+    setHeroMessage(dlg.text);
+  }, [user?.id, user?.selectedHero]);
+
+  const triggerHeroReaction = useCallback(
+    (event: DialogueEvent, ctx?: Parameters<typeof getHeroDialogue>[2], speak = true) => {
+      const heroId: HeroId = user?.selectedHero || 'captain-campus';
+      const dlg = getHeroDialogue(heroId, event, {
+        ...ctx,
+        studentName: user?.heroAlias || user?.fullName,
+        daysUntilExam: survivalSummary.daysUntilExam,
+      });
+      setHeroMood(dlg.mood);
+      setHeroMessage(dlg.text);
+      if (speak && state.preferences.voiceEnabled) {
+        speakHeroLine(dlg.text, true, state.preferences.voiceVolume);
+      }
+    },
+    [user?.selectedHero, user?.heroAlias, user?.fullName, survivalSummary.daysUntilExam, state.preferences.voiceEnabled, state.preferences.voiceVolume]
+  );
+
+  const triggerThanosAlert = useCallback(
+    (payload: Omit<ActiveThanosModal, 'quote'>, force = false) => {
+      const key = `${payload.subjectCode}-${payload.percentage.toFixed(2)}-${payload.isSimulation ? 'sim' : 'real'}`;
+      if (!force && lastThanosTriggerKeyRef.current === key) return;
+      lastThanosTriggerKeyRef.current = key;
+
+      const quote = pickThanosQuote(state.thanosAlerts.length);
+      const alertRecord: ThanosAlertRecord = {
+        id: `th-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        subjectCode: payload.subjectCode,
+        subjectName: payload.subjectName,
+        percentage: payload.percentage,
+        requiredPercentage: payload.requiredPercentage,
+        recoveryNeeded: payload.recoveryNeeded,
+        message: quote,
+        isSimulation: payload.isSimulation,
+        createdAt: new Date().toISOString(),
+      };
+
+      setActiveThanosModal({ ...payload, quote });
+      setState((prev) => ({
+        ...prev,
+        thanosAlerts: [alertRecord, ...prev.thanosAlerts].slice(0, 30),
+      }));
+      playThanosWarningSound(state.preferences.soundEnabled, state.preferences.soundVolume);
+    },
+    [state.thanosAlerts.length, state.preferences.soundEnabled, state.preferences.soundVolume]
+  );
+
+  const dismissThanosModal = () => setActiveThanosModal(null);
+  const dismissLevelUpBanner = () => setLevelUpBanner(null);
+
+  const awardCoinsAndXp = (
+    eventKey: string,
+    coinsDelta: number,
+    xpDelta: number,
+    description: string,
+    source: RewardTransaction['source'],
+    currentRewards: RewardTransaction[]
+  ): { nextRewards: RewardTransaction[]; awarded: boolean } => {
+    if (hasClaimedReward(currentRewards, eventKey)) {
+      return { nextRewards: currentRewards, awarded: false };
+    }
+    const tx: RewardTransaction = {
+      id: `rew-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      eventKey,
+      description,
+      coinsDelta,
+      xpDelta,
+      source,
+      createdAt: new Date().toISOString(),
+    };
+    if (user) {
+      const prevLevel = getLevelInfo(user.xp).level;
+      const nextXp = user.xp + xpDelta;
+      const nextCoins = user.coins + coinsDelta;
+      const nextLevelInfo = getLevelInfo(nextXp);
+      updateUserProfile({ coins: nextCoins, xp: nextXp });
+      if (nextLevelInfo.level > prevLevel) {
+        setLevelUpBanner({ level: nextLevelInfo.level, title: nextLevelInfo.title });
+        playShieldUnlockSound(state.preferences.soundEnabled, state.preferences.soundVolume);
+      } else {
+        playCoinSound(state.preferences.soundEnabled, state.preferences.soundVolume);
+      }
+    }
+    return { nextRewards: [tx, ...currentRewards], awarded: true };
+  };
+
+  const syncAchievementsAndNotifications = (
+    nextSubjects: Subject[],
+    nextTasks: SquadTask[],
+    nextODs: ODRequest[],
+    nextRewards: RewardTransaction[],
+    nextCoins: number,
+    nextXp: number,
+    nextStreak: number
+  ) => {
+    const completedTasksCount = nextTasks.filter((t) => t.status === 'COMPLETED').length;
+    const approvedODCount = nextODs.filter((o) => o.status === 'APPROVED').length;
+    const updatedBadges = evaluateAchievements(
+      nextSubjects,
+      nextCoins,
+      nextXp,
+      nextStreak,
+      completedTasksCount,
+      approvedODCount,
+      state.achievements
+    );
+    return { updatedBadges, nextRewards };
+  };
+
+  const recordStudentAttendance = (subjectId: string, status: 'PRESENT' | 'ABSENT', note?: string) => {
+    const target = state.subjects.find((s) => s.id === subjectId);
+    if (!target || !user) return;
+
+    const prevEval = evaluateAttendance(target.attended, target.total, target.minPercentage);
+    const nextAttended = status === 'PRESENT' ? target.attended + 1 : target.attended;
+    const nextTotal = target.total + 1;
+    const nextRemaining = Math.max(0, target.remainingClasses - 1);
+    const nextEval = evaluateAttendance(nextAttended, nextTotal, target.minPercentage);
+
+    const todayIso = toLocalDateIso();
+    const newRecord: AttendanceRecord = {
+      id: `rec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      studentId: user.id,
+      subjectId: target.id,
+      subjectCode: target.code,
+      subjectName: target.name,
+      date: todayIso,
+      status,
+      periods: 1,
+      source: 'STUDENT_SELF',
+      note,
+      previousAttended: target.attended,
+      previousTotal: target.total,
+      newAttended: nextAttended,
+      newTotal: nextTotal,
+      updatedBy: user.fullName,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextSubjects = state.subjects.map((s) =>
+      s.id === subjectId ? { ...s, attended: nextAttended, total: nextTotal, remainingClasses: nextRemaining } : s
+    );
+
+    let nextRewards = state.rewards;
+    let earnedCoins = 0;
+    let earnedXp = 0;
+
+    if (status === 'PRESENT') {
+      const is100After = nextAttended === nextTotal;
+      const bonus = is100After ? REWARD_RULES.SHIELD_100_BONUS_COINS : 0;
+      earnedCoins = REWARD_RULES.ATTEND_CLASS_COINS + bonus;
+      earnedXp = REWARD_RULES.ATTEND_CLASS_XP;
+      const eventKey = `att-${newRecord.id}`;
+      const res = awardCoinsAndXp(
+        eventKey,
+        earnedCoins,
+        earnedXp,
+        `${is100After ? '100% Shield Class' : 'Class Attended'}: ${target.code} ${target.name}`,
+        is100After ? 'SHIELD_BONUS' : 'ATTENDANCE',
+        state.rewards
+      );
+      nextRewards = res.nextRewards;
+
+      const isNewDay = user.lastAttendanceDate !== todayIso;
+      updateUserProfile({
+        classesAttendedToday: user.classesAttendedToday + 1,
+        dailyStreak: isNewDay ? user.dailyStreak + 1 : user.dailyStreak,
+        lastAttendanceDate: todayIso,
+      });
+    }
+
+    const addedNotifications: AppNotification[] = [];
+    if (!nextEval.isEligible && prevEval.isEligible) {
+      addedNotifications.push({
+        id: `notif-${Date.now()}`,
+        title: `Threshold Crossed: ${target.code}`,
+        message: `${target.name} dropped to ${nextEval.displayPercentage}. Attend ${nextEval.requiredRecoveryClasses} straight classes to recover.`,
+        category: 'WARNING',
+        read: false,
+        createdAt: new Date().toISOString(),
+      });
+    }
+
+    const updatedBadges = evaluateAchievements(
+      nextSubjects,
+      user.coins + earnedCoins,
+      user.xp + earnedXp,
+      user.dailyStreak,
+      state.tasks.filter((t) => t.status === 'COMPLETED').length,
+      state.odRequests.filter((o) => o.status === 'APPROVED').length,
+      state.achievements
+    );
+
+    // Update squad member privacy tier automatically without revealing exact %
+    const nextPrivacyTier = computeSquadPrivacyTier(nextSubjects);
+    const nextSquad = state.squad
+      ? {
+          ...state.squad,
+          members: state.squad.members.map((m) =>
+            m.id === user.id
+              ? {
+                  ...m,
+                  privacyTier: nextPrivacyTier,
+                  achievementPoints: user.xp + earnedXp,
+                  streak: user.dailyStreak,
+                }
+              : m
+          ),
+        }
+      : null;
+
+    setState((prev) => ({
+      ...prev,
+      subjects: nextSubjects,
+      records: [newRecord, ...prev.records],
+      rewards: nextRewards,
+      achievements: updatedBadges,
+      notifications: [...addedNotifications, ...prev.notifications],
+      squad: nextSquad,
+    }));
+
+    // Hero reaction + Thanos transition check
+    if (status === 'PRESENT') {
+      showToast(`${target.code}: Marked Present (+${earnedCoins}🪙, +${earnedXp} XP)`, 'success');
+      if (nextEval.isPerfect) {
+        triggerHeroReaction('PERFECT_100', { subjectName: target.name, percentage: 100 });
+        playShieldUnlockSound(state.preferences.soundEnabled, state.preferences.soundVolume);
+      } else if (!prevEval.isEligible && nextEval.isEligible) {
+        triggerHeroReaction('RECOVERY_PROGRESS', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          recoveryClasses: 0,
+        });
+      } else if (!nextEval.isEligible) {
+        triggerHeroReaction('RECOVERY_PROGRESS', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          recoveryClasses: nextEval.requiredRecoveryClasses,
+        });
+      } else {
+        triggerHeroReaction('ATTENDANCE_INCREASE', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+        });
+      }
+    } else {
+      showToast(`${target.code}: Absence logged (${nextEval.displayPercentage})`, 'info');
+      if (!nextEval.isEligible) {
+        triggerHeroReaction('BELOW_75', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          recoveryClasses: nextEval.requiredRecoveryClasses,
+        });
+        triggerThanosAlert({
+          subjectCode: target.code,
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          requiredPercentage: target.minPercentage,
+          recoveryNeeded: nextEval.requiredRecoveryClasses,
+          isSimulation: false,
+        });
+      } else if (nextEval.status === 'BORDERLINE') {
+        triggerHeroReaction('BORDERLINE_78', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          safeAbsences: nextEval.maxSafeAbsences,
+        });
+      } else {
+        triggerHeroReaction('SAFE_85', {
+          subjectName: target.name,
+          percentage: nextEval.exactPercentage,
+          safeAbsences: nextEval.maxSafeAbsences,
+        });
+      }
+    }
+  };
+
+  const addSubject = (subj: Omit<Subject, 'id' | 'studentId'>) => {
+    const newSubj: Subject = {
+      ...subj,
+      id: `subj-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      studentId: user?.id || 'demo-student-1',
+    };
+    setState((prev) => ({
+      ...prev,
+      subjects: [...prev.subjects, newSubj],
+    }));
+  };
+
+  const updateSubject = (id: string, updates: Partial<Subject>) => {
+    setState((prev) => ({
+      ...prev,
+      subjects: prev.subjects.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+    }));
+  };
+
+  const deleteSubject = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      subjects: prev.subjects.filter((s) => s.id !== id),
+    }));
+  };
+
+  const updateSemester = (updates: Partial<SemesterSettings>) => {
+    setState((prev) => ({
+      ...prev,
+      semester: { ...prev.semester, ...updates },
+    }));
+  };
+
+  const submitODRequest = (payload: {
+    eventName: string;
+    eventType: ODEventType;
+    startDate: string;
+    endDate: string;
+    subjectIds: string[];
+    periodsPerSubject: number;
+    documentNote: string;
+  }) => {
+    if (!user) return { ok: false, error: 'Not signed in.' };
+    if (!payload.eventName.trim() || payload.subjectIds.length === 0 || payload.periodsPerSubject < 1) {
+      return { ok: false, error: 'Provide an event name, at least one subject, and valid period count.' };
+    }
+
+    // Prevent duplicate identical pending OD submission
+    const duplicate = state.odRequests.some(
+      (od) =>
+        od.studentId === user.id &&
+        od.eventName.toLowerCase() === payload.eventName.trim().toLowerCase() &&
+        od.startDate === payload.startDate &&
+        od.status !== 'REJECTED'
+    );
+    if (duplicate) {
+      return { ok: false, error: 'An OD request for this event and start date already exists.' };
+    }
+
+    const newOD: ODRequest = {
+      id: `od-${Date.now()}`,
+      studentId: user.id,
+      studentName: user.fullName,
+      studentAlias: user.heroAlias,
+      eventName: payload.eventName.trim(),
+      eventType: payload.eventType,
+      startDate: payload.startDate,
+      endDate: payload.endDate || payload.startDate,
+      subjectIds: payload.subjectIds,
+      periodsPerSubject: payload.periodsPerSubject,
+      documentNote: payload.documentNote.trim(),
+      status: 'PENDING',
+      reconciled: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const notif: AppNotification = {
+      id: `notif-od-${Date.now()}`,
+      title: 'OD Request Submitted (Pending Faculty Verification)',
+      message: `${newOD.eventName} submitted for ${payload.subjectIds.length} subject(s). Credits apply only after approval.`,
+      category: 'OD',
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    setState((prev) => ({
+      ...prev,
+      odRequests: [newOD, ...prev.odRequests],
+      notifications: [notif, ...prev.notifications],
+    }));
+    return { ok: true };
+  };
+
+  const reviewODRequest = (odId: string, decision: 'APPROVED' | 'REJECTED', remarks: string) => {
+    if (!user || (user.role !== 'FACULTY' && user.role !== 'ADMIN')) {
+      return { ok: false, error: 'Unauthorized: Only Faculty or Admin can review OD requests.' };
+    }
+    const od = state.odRequests.find((o) => o.id === odId);
+    if (!od) return { ok: false, error: 'OD request not found.' };
+    if (od.reconciled || od.status !== 'PENDING') {
+      return { ok: false, error: 'This OD request has already been processed and cannot be duplicated.' };
+    }
+
+    const nowIso = new Date().toISOString();
+    let nextSubjects = state.subjects;
+    const addedRecords: AttendanceRecord[] = [];
+    const addedAudits: AuditLogEntry[] = [];
+
+    if (decision === 'APPROVED') {
+      nextSubjects = state.subjects.map((subj) => {
+        if (!od.subjectIds.includes(subj.id)) return subj;
+        const prevAtt = subj.attended;
+        const prevTot = subj.total;
+        const newAtt = prevAtt + od.periodsPerSubject;
+        const newTot = prevTot + od.periodsPerSubject;
+
+        addedRecords.push({
+          id: `rec-od-${od.id}-${subj.id}`,
+          studentId: od.studentId,
+          subjectId: subj.id,
+          subjectCode: subj.code,
+          subjectName: subj.name,
+          date: od.startDate,
+          status: 'OD_CREDIT',
+          periods: od.periodsPerSubject,
+          source: 'OD_RECONCILIATION',
+          note: `Approved OD: ${od.eventName} (${remarks || 'Verified'})`,
+          previousAttended: prevAtt,
+          previousTotal: prevTot,
+          newAttended: newAtt,
+          newTotal: newTot,
+          updatedBy: user.fullName,
+          createdAt: nowIso,
+        });
+
+        addedAudits.push({
+          id: `aud-${Date.now()}-${subj.code}`,
+          actorId: user.id,
+          actorName: user.fullName,
+          actorRole: user.role,
+          action: 'APPROVE_OD_RECONCILE',
+          targetType: 'OD',
+          targetId: od.id,
+          previousValue: `${subj.code}: ${prevAtt}/${prevTot}`,
+          newValue: `${subj.code}: ${newAtt}/${newTot} (+${od.periodsPerSubject} OD)`,
+          reason: remarks || `Approved ${od.eventName}`,
+          createdAt: nowIso,
+        });
+
+        return {
+          ...subj,
+          attended: newAtt,
+          total: newTot,
+        };
+      });
+    } else {
+      addedAudits.push({
+        id: `aud-${Date.now()}-rej`,
+        actorId: user.id,
+        actorName: user.fullName,
+        actorRole: user.role,
+        action: 'REJECT_OD',
+        targetType: 'OD',
+        targetId: od.id,
+        reason: remarks || 'Insufficient documentation',
+        createdAt: nowIso,
+      });
+    }
+
+    const notif: AppNotification = {
+      id: `notif-od-rev-${Date.now()}`,
+      title: decision === 'APPROVED' ? `OD Approved: ${od.eventName}` : `OD Rejected: ${od.eventName}`,
+      message:
+        decision === 'APPROVED'
+          ? `Reconciled +${od.periodsPerSubject} period(s) per subject into attendance history. Survival score updated!`
+          : `Reason: ${remarks || 'Please contact faculty coordinator.'}`,
+      category: 'OD',
+      read: false,
+      createdAt: nowIso,
+    };
+
+    setState((prev) => ({
+      ...prev,
+      subjects: nextSubjects,
+      records: [...addedRecords, ...prev.records],
+      odRequests: prev.odRequests.map((o) =>
+        o.id === odId
+          ? {
+              ...o,
+              status: decision,
+              reviewedBy: user.fullName,
+              remarks: remarks || (decision === 'APPROVED' ? 'Approved (Demo simulation)' : 'Rejected'),
+              reconciled: decision === 'APPROVED',
+              updatedAt: nowIso,
+            }
+          : o
+      ),
+      auditLogs: [...addedAudits, ...prev.auditLogs],
+      notifications: [notif, ...prev.notifications],
+    }));
+
+    return { ok: true };
+  };
+
+  const facultyUpdateStudentAttendance = (payload: {
+    studentId: string;
+    subjectId: string;
+    newAttended: number;
+    newTotal: number;
+    reason: string;
+  }) => {
+    if (!user || (user.role !== 'FACULTY' && user.role !== 'ADMIN')) {
+      return { ok: false, error: 'Unauthorized: Faculty or Admin access required.' };
+    }
+    if (!payload.reason.trim()) {
+      return { ok: false, error: 'An audit reason is required for every attendance modification.' };
+    }
+    if (payload.newTotal < 0 || payload.newAttended < 0 || payload.newAttended > payload.newTotal) {
+      return { ok: false, error: 'Attended classes cannot exceed total classes or be negative.' };
+    }
+
+    const isDemoMainStudent = payload.studentId === 'demo-student-1';
+    const targetSubject = isDemoMainStudent
+      ? state.subjects.find((s) => s.id === payload.subjectId)
+      : state.demoCohort
+          .find((st) => st.id === payload.studentId)
+          ?.subjects.find((s) => s.id === payload.subjectId);
+
+    if (!targetSubject) {
+      return { ok: false, error: 'Subject record not found.' };
+    }
+
+    if (
+      user.role === 'FACULTY' &&
+      user.assignedSubjectCodes &&
+      !user.assignedSubjectCodes.includes(targetSubject.code)
+    ) {
+      return {
+        ok: false,
+        error: `Access denied: You are only authorized to modify ${user.assignedSubjectCodes.join(', ')}.`,
+      };
+    }
+
+    const prevAtt = targetSubject.attended;
+    const prevTot = targetSubject.total;
+    const nowIso = new Date().toISOString();
+
+    const audit: AuditLogEntry = {
+      id: `aud-${Date.now()}`,
+      actorId: user.id,
+      actorName: user.fullName,
+      actorRole: user.role,
+      action: user.role === 'ADMIN' ? 'ADMIN_ATTENDANCE_CORRECTION' : 'FACULTY_ATTENDANCE_UPDATE',
+      targetType: 'ATTENDANCE',
+      targetId: `${payload.studentId}:${targetSubject.code}`,
+      previousValue: `${prevAtt}/${prevTot}`,
+      newValue: `${payload.newAttended}/${payload.newTotal}`,
+      reason: payload.reason.trim(),
+      createdAt: nowIso,
+    };
+
+    const nextNotifications = [...state.notifications];
+    const eligibleAfter = isAttendanceEligible(payload.newAttended, payload.newTotal, targetSubject.minPercentage);
+    if (!eligibleAfter && isDemoMainStudent) {
+      nextNotifications.unshift({
+        id: `notif-fac-${Date.now()}`,
+        title: `Faculty Update Alert: ${targetSubject.code}`,
+        message: `${user.fullName} updated ${targetSubject.code} to ${payload.newAttended}/${payload.newTotal}. Subject is now below ${targetSubject.minPercentage}%.`,
+        category: 'WARNING',
+        read: false,
+        createdAt: nowIso,
+      });
+    }
+
+    setState((prev) => ({
+      ...prev,
+      subjects: isDemoMainStudent
+        ? prev.subjects.map((s) =>
+            s.id === payload.subjectId ? { ...s, attended: payload.newAttended, total: payload.newTotal } : s
+          )
+        : prev.subjects,
+      demoCohort: !isDemoMainStudent
+        ? prev.demoCohort.map((st) =>
+            st.id === payload.studentId
+              ? {
+                  ...st,
+                  subjects: st.subjects.map((s) =>
+                    s.id === payload.subjectId ? { ...s, attended: payload.newAttended, total: payload.newTotal } : s
+                  ),
+                }
+              : st
+          )
+        : prev.demoCohort,
+      records: isDemoMainStudent
+        ? [
+            {
+              id: `rec-fac-${Date.now()}`,
+              studentId: payload.studentId,
+              subjectId: targetSubject.id,
+              subjectCode: targetSubject.code,
+              subjectName: targetSubject.name,
+              date: nowIso.slice(0, 10),
+              status: payload.newAttended >= prevAtt ? 'PRESENT' : 'ABSENT',
+              periods: Math.max(1, Math.abs(payload.newTotal - prevTot)),
+              source: user.role === 'ADMIN' ? 'ADMIN_CORRECTION' : 'FACULTY_VERIFIED',
+              note: payload.reason.trim(),
+              previousAttended: prevAtt,
+              previousTotal: prevTot,
+              newAttended: payload.newAttended,
+              newTotal: payload.newTotal,
+              updatedBy: user.fullName,
+              createdAt: nowIso,
+            },
+            ...prev.records,
+          ]
+        : prev.records,
+      auditLogs: [audit, ...prev.auditLogs],
+      notifications: nextNotifications,
+    }));
+
+    return { ok: true };
+  };
+
+  const addAnnouncement = (subjectCode: string, title: string, message: string) => {
+    if (!user) return;
+    const ann: FacultyAnnouncement = {
+      id: `ann-${Date.now()}`,
+      authorName: user.fullName,
+      subjectCode,
+      title,
+      message,
+      createdAt: new Date().toISOString(),
+    };
+    const notif: AppNotification = {
+      id: `notif-ann-${Date.now()}`,
+      title: `Announcement (${subjectCode}): ${title}`,
+      message,
+      category: 'ANNOUNCEMENT',
+      read: false,
+      createdAt: new Date().toISOString(),
+    };
+    setState((prev) => ({
+      ...prev,
+      announcements: [ann, ...prev.announcements],
+      notifications: [notif, ...prev.notifications],
+    }));
+  };
+
+  const createSquad = (name: string) => {
+    if (!user) return;
+    const code = `GUARD-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    const newSquad: Squad = {
+      id: `squad-${Date.now()}`,
+      name: name.trim() || 'Campus Shield Squad',
+      code,
+      weeklyChallengeTitle: 'Zero Unplanned Bunks This Week',
+      weeklyChallengeTarget: 15,
+      weeklyChallengeProgress: 3,
+      members: [
+        {
+          id: user.id,
+          heroAlias: user.heroAlias,
+          selectedHero: user.selectedHero,
+          levelTitle: getLevelInfo(user.xp).title,
+          achievementPoints: user.xp,
+          streak: user.dailyStreak,
+          privacyTier: computeSquadPrivacyTier(state.subjects),
+        },
+      ],
+    };
+    setState((prev) => ({ ...prev, squad: newSquad }));
+  };
+
+  const joinSquadByCode = (code: string) => {
+    if (!user) return { ok: false, error: 'Sign in first.' };
+    const clean = code.trim().toUpperCase();
+    if (!clean) return { ok: false, error: 'Enter a squad code.' };
+
+    if (clean === 'COE-75GUARD') {
+      setState((prev) => {
+        const exists = INITIAL_SQUAD.members.some((m) => m.id === user.id);
+        const members = exists
+          ? INITIAL_SQUAD.members
+          : [
+              ...INITIAL_SQUAD.members,
+              {
+                id: user.id,
+                heroAlias: user.heroAlias,
+                selectedHero: user.selectedHero,
+                levelTitle: getLevelInfo(user.xp).title,
+                achievementPoints: user.xp,
+                streak: user.dailyStreak,
+                privacyTier: computeSquadPrivacyTier(prev.subjects),
+              },
+            ];
+        return { ...prev, squad: { ...INITIAL_SQUAD, members } };
+      });
+      return { ok: true };
+    }
+
+    if (clean.length < 5) {
+      return { ok: false, error: 'Invalid squad code. Try COE-75GUARD or create a new squad.' };
+    }
+
+    setState((prev) => ({
+      ...prev,
+      squad: {
+        id: `squad-${clean}`,
+        name: `Squad ${clean}`,
+        code: clean,
+        weeklyChallengeTitle: 'Protect 75% Across All Subjects',
+        weeklyChallengeTarget: 10,
+        weeklyChallengeProgress: 4,
+        members: [
+          {
+            id: user.id,
+            heroAlias: user.heroAlias,
+            selectedHero: user.selectedHero,
+            levelTitle: getLevelInfo(user.xp).title,
+            achievementPoints: user.xp,
+            streak: user.dailyStreak,
+            privacyTier: computeSquadPrivacyTier(prev.subjects),
+          },
+          {
+            id: 'sq-bot-1',
+            heroAlias: 'NovaDefender-12',
+            selectedHero: 'doctor-deadline',
+            levelTitle: 'Shield Guardian',
+            achievementPoints: 580,
+            streak: 9,
+            privacyTier: 'Safe Zone',
+          },
+        ],
+      },
+    }));
+    return { ok: true };
+  };
+
+  const leaveSquad = () => setState((prev) => ({ ...prev, squad: null }));
+
+  const nudgeSquadMember = (memberId: string) => {
+    if (!state.squad) return;
+    const target = state.squad.members.find((m) => m.id === memberId);
+    if (!target) return;
+    const nowIso = new Date().toISOString();
+    setState((prev) => ({
+      ...prev,
+      squad: prev.squad
+        ? {
+            ...prev.squad,
+            members: prev.squad.members.map((m) => (m.id === memberId ? { ...m, lastNudgedAt: nowIso } : m)),
+          }
+        : null,
+      notifications: [
+        {
+          id: `notif-nudge-${Date.now()}`,
+          title: `Nudge sent to ${target.heroAlias}`,
+          message: `Reminded ${target.heroAlias} to stay locked in for today’s classes!`,
+          category: 'SQUAD',
+          read: false,
+          createdAt: nowIso,
+        },
+        ...prev.notifications,
+      ],
+    }));
+  };
+
+  const addTask = (task: Omit<SquadTask, 'id' | 'rewardClaimed' | 'createdAt'>) => {
+    const newTask: SquadTask = {
+      ...task,
+      id: `task-${Date.now()}`,
+      rewardClaimed: false,
+      createdAt: new Date().toISOString(),
+    };
+    setState((prev) => ({ ...prev, tasks: [newTask, ...prev.tasks] }));
+  };
+
+  const updateTask = (id: string, updates: Partial<SquadTask>) => {
+    setState((prev) => ({
+      ...prev,
+      tasks: prev.tasks.map((t) => (t.id === id ? { ...t, ...updates } : t)),
+    }));
+  };
+
+  const deleteTask = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      tasks: prev.tasks.filter((t) => t.id !== id),
+    }));
+  };
+
+  const toggleTaskCompletion = (id: string) => {
+    const task = state.tasks.find((t) => t.id === id);
+    if (!task) return;
+    const nextStatus: SquadTask['status'] = task.status === 'COMPLETED' ? 'TODO' : 'COMPLETED';
+    let nextRewards = state.rewards;
+    let rewardClaimed = task.rewardClaimed;
+
+    if (nextStatus === 'COMPLETED' && !task.rewardClaimed) {
+      const rule = REWARD_RULES.TASK_REWARDS[task.category] || { coins: 15, xp: 15 };
+      const res = awardCoinsAndXp(
+        `task-complete-${task.id}`,
+        rule.coins,
+        rule.xp,
+        `Completed ${task.category}: ${task.title}`,
+        'TASK',
+        state.rewards
+      );
+      nextRewards = res.nextRewards;
+      rewardClaimed = true;
+      triggerHeroReaction('TASK_COMPLETE');
+    }
+
+    const nextTasks = state.tasks.map((t) =>
+      t.id === id ? { ...t, status: nextStatus, rewardClaimed } : t
+    );
+
+    const { updatedBadges } = syncAchievementsAndNotifications(
+      state.subjects,
+      nextTasks,
+      state.odRequests,
+      nextRewards,
+      user?.coins || 0,
+      user?.xp || 0,
+      user?.dailyStreak || 0
+    );
+
+    setState((prev) => ({
+      ...prev,
+      tasks: nextTasks,
+      rewards: nextRewards,
+      achievements: updatedBadges,
+    }));
+  };
+
+  const purchaseAura = (auraId: string) => {
+    if (!user) return { ok: false, error: 'Sign in first.' };
+    const item = HERO_AURAS.find((a) => a.id === auraId);
+    if (!item) return { ok: false, error: 'Aura not found.' };
+    if (user.unlockedAuras.includes(auraId)) {
+      updateUserProfile({ equippedAura: auraId });
+      return { ok: true };
+    }
+    if (user.coins < item.costCoins) {
+      return { ok: false, error: `Need ${item.costCoins - user.coins} more coins to unlock ${item.name}.` };
+    }
+    updateUserProfile({
+      coins: user.coins - item.costCoins,
+      unlockedAuras: [...user.unlockedAuras, auraId],
+      equippedAura: auraId,
+    });
+    playShieldUnlockSound(state.preferences.soundEnabled, state.preferences.soundVolume);
+    return { ok: true };
+  };
+
+  const equipAura = (auraId: string) => {
+    if (!user || !user.unlockedAuras.includes(auraId)) return;
+    updateUserProfile({ equippedAura: auraId });
+  };
+
+  const selectHero = (heroId: HeroId) => {
+    updateUserProfile({ selectedHero: heroId });
+    const dlg = getHeroDialogue(heroId, 'WELCOME', {
+      percentage: overallSummary.overallEval.exactPercentage,
+      daysUntilExam: survivalSummary.daysUntilExam,
+      studentName: user?.heroAlias || user?.fullName,
+    });
+    setHeroMood(dlg.mood);
+    setHeroMessage(dlg.text);
+  };
+
+  const markNotificationRead = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((n) => (n.id === id ? { ...n, read: true } : n)),
+    }));
+  };
+
+  const markAllNotificationsRead = () => {
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.map((n) => ({ ...n, read: true })),
+    }));
+  };
+
+  const dismissNotification = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      notifications: prev.notifications.filter((n) => n.id !== id),
+    }));
+  };
+
+  const updatePreferences = (updates: Partial<AppPreferences>) => {
+    setState((prev) => ({
+      ...prev,
+      preferences: { ...prev.preferences, ...updates },
+    }));
+  };
+
+  const undoAttendanceRecord = (recordId: string) => {
+    const rec = state.records.find((r) => r.id === recordId);
+    if (!rec) return { ok: false, error: 'Record not found.' };
+    if (rec.source !== 'STUDENT_SELF') {
+      return { ok: false, error: 'Only self-logged student records can be undone directly.' };
+    }
+
+    const subj = state.subjects.find((s) => s.id === rec.subjectId);
+    const nextSubjects = subj
+      ? state.subjects.map((s) => {
+          if (s.id !== rec.subjectId) return s;
+          const revertedTotal = Math.max(0, s.total - rec.periods);
+          const revertedAttended =
+            rec.status === 'PRESENT' ? Math.max(0, Math.min(revertedTotal, s.attended - rec.periods)) : s.attended;
+          return {
+            ...s,
+            attended: revertedAttended,
+            total: revertedTotal,
+            remainingClasses: s.remainingClasses + rec.periods,
+          };
+        })
+      : state.subjects;
+
+    const rewardEventKey = `att-${rec.id}`;
+    const rewardTx = state.rewards.find((tx) => tx.eventKey === rewardEventKey);
+    if (rewardTx && user) {
+      updateUserProfile({
+        coins: Math.max(0, user.coins - rewardTx.coinsDelta),
+        xp: Math.max(0, user.xp - rewardTx.xpDelta),
+        classesAttendedToday:
+          rec.date === toLocalDateIso() && rec.status === 'PRESENT'
+            ? Math.max(0, user.classesAttendedToday - 1)
+            : user.classesAttendedToday,
+      });
+    }
+
+    setState((prev) => ({
+      ...prev,
+      subjects: nextSubjects,
+      records: prev.records.filter((r) => r.id !== recordId),
+      rewards: prev.rewards.filter((tx) => tx.eventKey !== rewardEventKey),
+    }));
+    showToast(`Undid ${rec.subjectCode} log cleanly`, 'info');
+    return { ok: true };
+  };
+
+  const startCleanSemester = (payload: {
+    semesterName: string;
+    startDate: string;
+    endDate: string;
+    examDate: string;
+    defaultMinPercentage: number;
+  }) => {
+    lastThanosTriggerKeyRef.current = '';
+    if (user) {
+      updateUserProfile({
+        coins: 50,
+        xp: 0,
+        dailyStreak: 0,
+        weeklyStreak: 0,
+        classesAttendedToday: 0,
+        lastAttendanceDate: null,
+      });
+    }
+    setState((prev) => ({
+      ...prev,
+      subjects: [],
+      records: [],
+      odRequests: [],
+      tasks: [],
+      rewards: [],
+      thanosAlerts: [],
+      notifications: [
+        {
+          id: `notif-clean-${Date.now()}`,
+          title: 'Personal Semester Initialized!',
+          message: `Started "${payload.semesterName}". Add your subjects in Subjects and configure your timetable in Semester Radar.`,
+          category: 'EXAM',
+          read: false,
+          createdAt: new Date().toISOString(),
+        },
+      ],
+      semester: {
+        ...prev.semester,
+        semesterName: payload.semesterName.trim() || 'My College Semester',
+        startDate: payload.startDate,
+        endDate: payload.endDate,
+        examDate: payload.examDate,
+        defaultMinPercentage: Math.max(50, Math.min(95, payload.defaultMinPercentage)),
+        holidays: [],
+        importantEvents: [
+          {
+            id: `ev-exam-${Date.now()}`,
+            date: payload.examDate,
+            title: 'End-Semester Examinations Begin',
+            type: 'EXAM',
+          },
+        ],
+        timetable: { 1: [], 2: [], 3: [], 4: [], 5: [] },
+      },
+    }));
+  };
+
+  const exportBackupJson = () =>
+    JSON.stringify(
+      {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        profile: user,
+        state,
+      },
+      null,
+      2
+    );
+
+  const importBackupJson = (rawJson: string) => {
+    try {
+      const parsed = JSON.parse(rawJson) as { profile?: Partial<typeof user>; state?: Partial<PersistedState> };
+      if (!parsed.state || !Array.isArray(parsed.state.subjects)) {
+        return { ok: false, error: 'Invalid AttendanceGuard backup file.' };
+      }
+      setState((prev) => ({
+        ...prev,
+        ...parsed.state,
+        preferences: parsed.state?.preferences
+          ? { ...DEFAULT_PREFERENCES, ...parsed.state.preferences }
+          : prev.preferences,
+      }));
+      if (parsed.profile && user) {
+        const { id: _id, role: _role, ...safeProfileFields } = parsed.profile;
+        updateUserProfile(safeProfileFields);
+      }
+      return { ok: true };
+    } catch {
+      return { ok: false, error: 'Could not parse JSON backup file.' };
+    }
+  };
+
+  const triggerDailyReminder = useCallback(
+    (force = false) => {
+      if (!user || user.role !== 'STUDENT') return;
+      const now = new Date();
+      const todayIso = toLocalDateIso(now);
+      if (!force && state.preferences.lastDailyReminderDate === todayIso) return;
+
+      const weekday = now.getDay();
+      const scheduledCodes = state.semester.timetable[weekday] || [];
+      const atRiskSubjects = state.subjects.filter(
+        (s) => !isAttendanceEligible(s.attended, s.total, s.minPercentage)
+      );
+      const pendingTasks = state.tasks.filter((t) => t.status !== 'COMPLETED');
+      const heroImg =
+        atRiskSubjects.length > 0
+          ? 'assets/characters/thanos-admin.jpg'
+          : `assets/characters/${user.selectedHero}.jpg`;
+
+      const parts: string[] = [];
+      parts.push(
+        scheduledCodes.length > 0
+          ? `Today’s classes: ${scheduledCodes.join(', ')}.`
+          : 'No regular timetable periods scheduled today.'
+      );
+      if (atRiskSubjects.length > 0) {
+        parts.push(
+          `Alert: ${atRiskSubjects.map((s) => s.code).join(', ')} below ${atRiskSubjects[0].minPercentage}% — don’t skip!`
+        );
+      } else {
+        parts.push(`Overall attendance: ${overallSummary.overallEval.displayPercentage}.`);
+      }
+      if (pendingTasks.length > 0) {
+        parts.push(`${pendingTasks.length} pending task(s) in Squad Board.`);
+      }
+
+      const title =
+        atRiskSubjects.length > 0
+          ? 'Daily College Reminder • Recovery Alert'
+          : 'Daily College Reminder • Morning Check-In';
+      const message = parts.join(' ');
+
+      const notif: AppNotification = {
+        id: `notif-daily-${Date.now()}`,
+        title,
+        message,
+        category: atRiskSubjects.length > 0 ? 'RECOVERY' : 'EXAM',
+        imageUrl: heroImg,
+        read: false,
+        createdAt: new Date().toISOString(),
+      };
+
+      setState((prev) => ({
+        ...prev,
+        notifications: [notif, ...prev.notifications],
+        preferences: { ...prev.preferences, lastDailyReminderDate: todayIso },
+      }));
+
+      showToast(force ? 'Daily reminder notification triggered!' : title, 'info');
+
+      if (
+        state.preferences.browserNotificationsEnabled &&
+        typeof window !== 'undefined' &&
+        'Notification' in window &&
+        Notification.permission === 'granted'
+      ) {
+        try {
+          new Notification(title, {
+            body: message,
+            icon: assetUrl(heroImg),
+          });
+        } catch {
+          // ignore notification constructor errors in restricted environments
+        }
+      }
+    },
+    [
+      user,
+      state.preferences.lastDailyReminderDate,
+      state.preferences.browserNotificationsEnabled,
+      state.semester.timetable,
+      state.subjects,
+      state.tasks,
+      overallSummary.overallEval.displayPercentage,
+      showToast,
+    ]
+  );
+
+  const requestBrowserNotificationPermission = async (): Promise<NotificationPermission | 'unsupported'> => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return 'unsupported';
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      updatePreferences({ browserNotificationsEnabled: true });
+      showToast('Browser notifications enabled with character icons!', 'success');
+    } else {
+      updatePreferences({ browserNotificationsEnabled: false });
+      showToast('Browser notifications were blocked or dismissed.', 'info');
+    }
+    return perm;
+  };
+
+  // Automatic daily reminder check when app is open at/after configured reminder time
+  useEffect(() => {
+    if (!user || user.role !== 'STUDENT' || !state.preferences.dailyReminderEnabled) return;
+    const now = new Date();
+    const todayIso = toLocalDateIso(now);
+    if (state.preferences.lastDailyReminderDate === todayIso) return;
+    const [hh, mm] = (state.preferences.dailyReminderTime || '08:30').split(':').map(Number);
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const targetMins = (hh || 8) * 60 + (mm || 30);
+    if (currentMins >= targetMins) {
+      triggerDailyReminder(false);
+    }
+  }, [
+    user?.id,
+    user?.role,
+    state.preferences.dailyReminderEnabled,
+    state.preferences.dailyReminderTime,
+    state.preferences.lastDailyReminderDate,
+    triggerDailyReminder,
+  ]);
+
+  const resetDemoState = () => {
+    localStorage.removeItem(STATE_KEY);
+    localStorage.removeItem('ag_demo_student_profile_v1');
+    lastThanosTriggerKeyRef.current = '';
+    setState({
+      subjects: INITIAL_SUBJECTS,
+      records: INITIAL_RECORDS,
+      semester: INITIAL_SEMESTER,
+      odRequests: INITIAL_OD_REQUESTS,
+      squad: INITIAL_SQUAD,
+      tasks: INITIAL_TASKS,
+      rewards: INITIAL_REWARDS,
+      achievements: INITIAL_ACHIEVEMENTS,
+      notifications: INITIAL_NOTIFICATIONS,
+      announcements: INITIAL_ANNOUNCEMENTS,
+      auditLogs: INITIAL_AUDIT_LOGS,
+      thanosAlerts: INITIAL_THANOS_ALERTS,
+      demoCohort: INITIAL_DEMO_COHORT,
+      preferences: DEFAULT_PREFERENCES,
+    });
+  };
+
+  const unreadNotificationCount = useMemo(
+    () => state.notifications.filter((n) => !n.read).length,
+    [state.notifications]
+  );
+
+  return (
+    <AppStateContext.Provider
+      value={{
+        ...state,
+        heroMood,
+        heroMessage,
+        activeThanosModal,
+        levelUpBanner,
+        toastMessage,
+        survivalSummary,
+        overallSummary,
+        unreadNotificationCount,
+        dismissThanosModal,
+        dismissLevelUpBanner,
+        showToast,
+        dismissToast,
+        triggerHeroReaction,
+        triggerThanosAlert,
+        recordStudentAttendance,
+        undoAttendanceRecord,
+        addSubject,
+        updateSubject,
+        deleteSubject,
+        updateSemester,
+        startCleanSemester,
+        exportBackupJson,
+        importBackupJson,
+        submitODRequest,
+        reviewODRequest,
+        facultyUpdateStudentAttendance,
+        addAnnouncement,
+        createSquad,
+        joinSquadByCode,
+        leaveSquad,
+        nudgeSquadMember,
+        addTask,
+        updateTask,
+        deleteTask,
+        toggleTaskCompletion,
+        purchaseAura,
+        equipAura,
+        selectHero,
+        markNotificationRead,
+        markAllNotificationsRead,
+        dismissNotification,
+        triggerDailyReminder,
+        requestBrowserNotificationPermission,
+        updatePreferences,
+        resetDemoState,
+      }}
+    >
+      {children}
+    </AppStateContext.Provider>
+  );
+};
+
+export function useAppState() {
+  const ctx = useContext(AppStateContext);
+  if (!ctx) throw new Error('useAppState must be used inside AppStateProvider');
+  return ctx;
+}

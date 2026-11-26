@@ -1,0 +1,16 @@
+{
+  "name": "AttendanceGuard – Your Attendance. Your Squad. Your Semester.",
+  "short_name": "AttendanceGuard",
+  "description": "AI-Powered Gamified Predictive Attendance & Semester Survival Platform for daily college use.",
+  "start_url": "./dashboard",
+  "display": "standalone",
+  "background_color": "#080817",
+  "theme_color": "#080817",
+  "icons": [
+    {
+      "src": "./assets/characters/captain-campus.jpg",
+      "sizes": "246x242",
+      "type": "image/jpeg"
+    }
+  ]
+}
