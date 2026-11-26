@@ -278,17 +278,61 @@ RETURNS TEXT AS $$
   SELECT role FROM public.profiles WHERE id = auth.uid();
 $$ LANGUAGE SQL SECURITY DEFINER STABLE;
 
--- Profiles: students see own profile; admin sees all; faculty sees authorized info via views
+-- Profiles: students see own profile; faculty sees students; admin sees/updates all; users insert/update own row
+CREATE POLICY "Users insert own profile" ON public.profiles
+  FOR INSERT WITH CHECK (id = auth.uid());
 CREATE POLICY "Users read own profile" ON public.profiles
-  FOR SELECT USING (id = auth.uid() OR public.current_user_role() = 'ADMIN');
+  FOR SELECT USING (
+    id = auth.uid()
+    OR public.current_user_role() = 'ADMIN'
+    OR (public.current_user_role() = 'FACULTY' AND role = 'STUDENT')
+  );
 CREATE POLICY "Users update own profile" ON public.profiles
-  FOR UPDATE USING (id = auth.uid());
+  FOR UPDATE USING (id = auth.uid() OR public.current_user_role() = 'ADMIN');
 
--- Subjects: student owns their subjects; faculty can view/update only assigned subject codes; admin all
+-- Auto-create profile row whenever a new user signs up in Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, hero_alias, role, department, semester_number, register_number, selected_hero, assigned_subject_codes)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.email, ''),
+    COALESCE(NEW.raw_user_meta_data->>'fullName', split_part(COALESCE(NEW.email, 'user'), '@', 1)),
+    COALESCE(NEW.raw_user_meta_data->>'heroAlias', 'CampusGuardian'),
+    CASE
+      WHEN NEW.raw_user_meta_data->>'role' = 'FACULTY' THEN 'FACULTY'
+      ELSE 'STUDENT'
+    END,
+    COALESCE(NEW.raw_user_meta_data->>'department', 'CSE'),
+    COALESCE((NEW.raw_user_meta_data->>'semesterNumber')::INT, 5),
+    COALESCE(NEW.raw_user_meta_data->>'registerNumber', ''),
+    COALESCE(NEW.raw_user_meta_data->>'selectedHero', 'captain-campus'),
+    COALESCE(
+      ARRAY(SELECT jsonb_array_elements_text(NEW.raw_user_meta_data->'assignedSubjectCodes')),
+      ARRAY[]::TEXT[]
+    )
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Subjects: student owns their subjects; faculty can view/update assigned subject codes; admin all
 CREATE POLICY "Student manages own subjects" ON public.subjects
   FOR ALL USING (student_id = auth.uid());
 CREATE POLICY "Faculty reads assigned subjects" ON public.subjects
   FOR SELECT USING (
+    public.current_user_role() = 'FACULTY' AND
+    code = ANY((SELECT assigned_subject_codes FROM public.profiles WHERE id = auth.uid()))
+  );
+CREATE POLICY "Faculty updates assigned subjects" ON public.subjects
+  FOR UPDATE USING (
     public.current_user_role() = 'FACULTY' AND
     code = ANY((SELECT assigned_subject_codes FROM public.profiles WHERE id = auth.uid()))
   );
@@ -311,15 +355,19 @@ CREATE POLICY "Faculty/Admin review OD requests" ON public.od_requests
 CREATE POLICY "Faculty/Admin update OD status" ON public.od_requests
   FOR UPDATE USING (public.current_user_role() IN ('FACULTY', 'ADMIN'));
 
--- Notifications, Rewards, Achievements, Alerts: strict owner isolation
+-- Notifications, Rewards, Achievements, Alerts: owner isolation + Faculty/Admin notification delivery
 CREATE POLICY "User owns notifications" ON public.notifications FOR ALL USING (user_id = auth.uid());
+CREATE POLICY "Faculty/Admin send notifications" ON public.notifications
+  FOR INSERT WITH CHECK (public.current_user_role() IN ('FACULTY', 'ADMIN'));
 CREATE POLICY "Student owns rewards" ON public.reward_transactions FOR SELECT USING (student_id = auth.uid());
 CREATE POLICY "Student owns achievements" ON public.achievements FOR ALL USING (student_id = auth.uid());
 CREATE POLICY "Student owns alerts" ON public.attendance_alerts FOR ALL USING (student_id = auth.uid());
 
--- Audit logs: Admin & Faculty read; inserts via server RPC
+-- Audit logs: Admin & Faculty read/write
 CREATE POLICY "Admin reads audit logs" ON public.audit_logs
-  FOR SELECT USING (public.current_user_role() = 'ADMIN');
+  FOR SELECT USING (public.current_user_role() IN ('ADMIN', 'FACULTY'));
+CREATE POLICY "Faculty/Admin write audit logs" ON public.audit_logs
+  FOR INSERT WITH CHECK (public.current_user_role() IN ('ADMIN', 'FACULTY'));
 
 -- Announcements: all authenticated read; faculty/admin create
 CREATE POLICY "Everyone reads announcements" ON public.announcements FOR SELECT USING (auth.uid() IS NOT NULL);

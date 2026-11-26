@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { DEMO_ACCOUNTS } from '../services/demoData';
 import { isSupabaseConfigured, supabase } from '../services/supabaseClient';
+import { fetchSupabaseProfile, upsertSupabaseProfile } from '../services/supabaseStorage';
 import { HeroId, UserProfile, UserRole } from '../types';
 
 interface AuthContextValue {
@@ -56,9 +57,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (data.session?.user && !user) {
         const meta = data.session.user.user_metadata || {};
+        const dbProfile = await fetchSupabaseProfile(data.session.user.id);
         setUser({
           ...DEMO_ACCOUNTS.STUDENT,
           id: data.session.user.id,
@@ -66,6 +68,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           fullName: (meta.fullName as string) || 'Student Hero',
           heroAlias: (meta.heroAlias as string) || 'Guardian',
           role: (meta.role as UserRole) || 'STUDENT',
+          ...dbProfile,
           isDemo: false,
         });
       }
@@ -102,20 +105,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (isSupabaseConfigured && supabase) {
       setLoading(true);
       const { data, error } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
-      setLoading(false);
       if (error || !data.user) {
+        setLoading(false);
         return { ok: false, error: error?.message || 'Supabase sign-in failed.' };
       }
       const meta = data.user.user_metadata || {};
-      setUser({
+      const dbProfile = await fetchSupabaseProfile(data.user.id);
+      setLoading(false);
+      const resolvedProfile: UserProfile = {
         ...DEMO_ACCOUNTS.STUDENT,
         id: data.user.id,
         email: data.user.email || trimmedEmail,
         fullName: (meta.fullName as string) || trimmedEmail.split('@')[0],
         heroAlias: (meta.heroAlias as string) || 'CampusHero',
         role: (meta.role as UserRole) || role,
+        ...dbProfile,
         isDemo: false,
-      });
+      };
+      if (!dbProfile) {
+        void upsertSupabaseProfile(resolvedProfile);
+      }
+      setUser(resolvedProfile);
       return { ok: true };
     }
 
@@ -172,6 +182,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           data: {
             fullName: payload.fullName.trim(),
             heroAlias: payload.heroAlias.trim() || 'CampusGuardian',
+            department: payload.department,
+            registerNumber: payload.registerNumber,
+            semesterNumber: payload.semesterNumber,
+            selectedHero: payload.selectedHero,
             role: 'STUDENT',
           },
         },
@@ -180,7 +194,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error || !data.user) {
         return { ok: false, error: error?.message || 'Registration failed.' };
       }
-      setUser({
+      const createdProfile: UserProfile = {
         ...DEMO_ACCOUNTS.STUDENT,
         id: data.user.id,
         email,
@@ -196,7 +210,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         weeklyStreak: 0,
         classesAttendedToday: 0,
         isDemo: false,
-      });
+      };
+      void upsertSupabaseProfile(createdProfile);
+      setUser(createdProfile);
       return { ok: true };
     }
 
@@ -325,6 +341,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const next = { ...prev, ...updates };
       if (next.role === 'STUDENT' && next.id === DEMO_ACCOUNTS.STUDENT.id) {
         localStorage.setItem('ag_demo_student_profile_v1', JSON.stringify(next));
+      } else if (!next.isDemo) {
+        void upsertSupabaseProfile(next);
+      } else {
+        try {
+          const storedRaw = localStorage.getItem(REGISTERED_DEMO_USERS_KEY);
+          const storedUsers: Array<UserProfile & { passwordHash: string }> = storedRaw ? JSON.parse(storedRaw) : [];
+          const updatedList = storedUsers.map((u) => (u.id === next.id ? { ...u, ...next } : u));
+          localStorage.setItem(REGISTERED_DEMO_USERS_KEY, JSON.stringify(updatedList));
+        } catch {
+          // ignore storage error
+        }
       }
       return next;
     });

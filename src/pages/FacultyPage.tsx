@@ -48,19 +48,22 @@ export const FacultyPage: React.FC = () => {
   // Roll Call ("Put Attendance") state
   const assignedCodes = user?.role === 'ADMIN' ? null : user?.assignedSubjectCodes || [];
   const allStudents = useMemo(
-    () => [
-      {
-        id: 'demo-student-1',
-        fullName: 'Arjun Karthik',
-        heroAlias: 'CyberShield-07',
-        registerNumber: '22CSE042',
-        department: 'CSE (CoE AI)',
-        semesterNumber: 5,
-        subjects,
-      },
-      ...demoCohort,
-    ],
-    [subjects, demoCohort]
+    () =>
+      user && !user.isDemo
+        ? demoCohort
+        : [
+            {
+              id: 'demo-student-1',
+              fullName: 'Arjun Karthik',
+              heroAlias: 'CyberShield-07',
+              registerNumber: '22CSE042',
+              department: 'CSE (CoE AI)',
+              semesterNumber: 5,
+              subjects,
+            },
+            ...demoCohort,
+          ],
+    [subjects, demoCohort, user]
   );
 
   const authorizedSubjectCodes = useMemo(() => {

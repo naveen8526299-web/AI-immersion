@@ -51,6 +51,11 @@ import {
 } from '../utils/gamification';
 import { playCoinSound, playShieldUnlockSound, playThanosWarningSound, speakHeroLine } from '../utils/soundEngine';
 import { predictHallTicketSurvival } from '../utils/survivalPredictor';
+import {
+  fetchSupabaseWorkspaceData,
+  syncSupabaseAnnouncement,
+  syncSupabaseSubjectAttendance,
+} from '../services/supabaseStorage';
 import { useAuth } from './AuthContext';
 
 const STATE_KEY = 'ag_app_state_v1';
@@ -251,6 +256,8 @@ interface AppStateContextValue extends PersistedState {
     department: string;
     semesterNumber: number;
     heroAlias?: string;
+    email?: string;
+    password?: string;
   }) => { ok: boolean; error?: string };
   adminBroadcastNotification: (payload: {
     target: 'ALL' | 'AT_RISK';
@@ -298,11 +305,54 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [user]);
 
-  const overallSummary = useMemo(() => evaluateOverallSubjects(state.subjects), [state.subjects]);
+  // Hydrate real student/faculty/admin records from Supabase when configured
+  useEffect(() => {
+    if (!user || user.isDemo) return;
+    let cancelled = false;
+    fetchSupabaseWorkspaceData(user, INITIAL_SUBJECTS).then((remote) => {
+      if (cancelled) return;
+      setState((prev) => ({
+        ...prev,
+        subjects: remote.subjects && remote.subjects.length > 0 ? remote.subjects : prev.subjects,
+        demoCohort: remote.cohort && remote.cohort.length > 0 ? remote.cohort : prev.demoCohort,
+        records: remote.records && remote.records.length > 0 ? remote.records : prev.records,
+        odRequests: remote.odRequests && remote.odRequests.length > 0 ? remote.odRequests : prev.odRequests,
+        announcements: remote.announcements && remote.announcements.length > 0 ? remote.announcements : prev.announcements,
+      }));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.role, user?.isDemo]);
+
+  // Each logged-in student gets their own stored subjects (either state.subjects or their demoCohort record)
+  const isDefaultMainStudent = !user || user.role !== 'STUDENT' || user.id === 'demo-student-1' || !user.isDemo;
+  const activeSubjects = useMemo(() => {
+    if (isDefaultMainStudent) return state.subjects;
+    const found = state.demoCohort.find((st) => st.id === user?.id);
+    return found ? found.subjects : state.subjects;
+  }, [isDefaultMainStudent, state.subjects, state.demoCohort, user?.id]);
+
+  const applySubjectsForStudent = useCallback(
+    (prev: PersistedState, studentId: string, updater: (list: Subject[]) => Subject[]): Partial<PersistedState> => {
+      const usesMainSubjects = studentId === 'demo-student-1' || Boolean(user && !user.isDemo && studentId === user.id);
+      if (usesMainSubjects) {
+        return { subjects: updater(prev.subjects) };
+      }
+      return {
+        demoCohort: prev.demoCohort.map((st) =>
+          st.id === studentId ? { ...st, subjects: updater(st.subjects) } : st
+        ),
+      };
+    },
+    [user]
+  );
+
+  const overallSummary = useMemo(() => evaluateOverallSubjects(activeSubjects), [activeSubjects]);
 
   const survivalSummary = useMemo(
-    () => predictHallTicketSurvival(state.subjects, state.semester, state.odRequests, state.tasks),
-    [state.subjects, state.semester, state.odRequests, state.tasks]
+    () => predictHallTicketSurvival(activeSubjects, state.semester, state.odRequests, state.tasks),
+    [activeSubjects, state.semester, state.odRequests, state.tasks]
   );
 
   // Sync welcome hero line once user logs in or changes hero
@@ -426,7 +476,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const recordStudentAttendance = (subjectId: string, status: 'PRESENT' | 'ABSENT', note?: string) => {
-    const target = state.subjects.find((s) => s.id === subjectId);
+    const target = activeSubjects.find((s) => s.id === subjectId);
     if (!target || !user) return;
     if (user.role === 'STUDENT' && state.featureControls.studentSelfAttendanceLocked) {
       showToast('Official attendance is locked by College Admin. Contact Faculty or submit an OD.', 'info');
@@ -459,7 +509,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: new Date().toISOString(),
     };
 
-    const nextSubjects = state.subjects.map((s) =>
+    const nextSubjects = activeSubjects.map((s) =>
       s.id === subjectId ? { ...s, attended: nextAttended, total: nextTotal, remainingClasses: nextRemaining } : s
     );
 
@@ -533,13 +583,20 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     setState((prev) => ({
       ...prev,
-      subjects: nextSubjects,
+      ...applySubjectsForStudent(prev, user.id, () => nextSubjects),
       records: [newRecord, ...prev.records],
       rewards: nextRewards,
       achievements: updatedBadges,
       notifications: [...addedNotifications, ...prev.notifications],
       squad: nextSquad,
     }));
+    void syncSupabaseSubjectAttendance({
+      studentId: user.id,
+      subjectId: target.id,
+      newAttended: nextAttended,
+      newTotal: nextTotal,
+      record: newRecord,
+    });
 
     // Hero reaction + Thanos transition check
     if (status === 'PRESENT') {
@@ -602,14 +659,15 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       showToast('Subject editing is managed by College Administration.', 'info');
       return;
     }
+    const studentId = user?.id || 'demo-student-1';
     const newSubj: Subject = {
       ...subj,
       id: `subj-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-      studentId: user?.id || 'demo-student-1',
+      studentId,
     };
     setState((prev) => ({
       ...prev,
-      subjects: [...prev.subjects, newSubj],
+      ...applySubjectsForStudent(prev, studentId, (list) => [...list, newSubj]),
     }));
   };
 
@@ -618,9 +676,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       showToast('Subject editing is managed by College Administration.', 'info');
       return;
     }
+    const studentId = user?.id || 'demo-student-1';
     setState((prev) => ({
       ...prev,
-      subjects: prev.subjects.map((s) => (s.id === id ? { ...s, ...updates } : s)),
+      ...applySubjectsForStudent(prev, studentId, (list) => list.map((s) => (s.id === id ? { ...s, ...updates } : s))),
     }));
   };
 
@@ -629,9 +688,10 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       showToast('Subject deletion is restricted by College Administration.', 'info');
       return;
     }
+    const studentId = user?.id || 'demo-student-1';
     setState((prev) => ({
       ...prev,
-      subjects: prev.subjects.filter((s) => s.id !== id),
+      ...applySubjectsForStudent(prev, studentId, (list) => list.filter((s) => s.id !== id)),
     }));
   };
 
@@ -714,12 +774,16 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
 
     const nowIso = new Date().toISOString();
-    let nextSubjects = state.subjects;
+    const odOwnerUsesMain = od.studentId === 'demo-student-1' || Boolean(user && !user.isDemo && od.studentId === user.id);
+    const ownerSubjects = odOwnerUsesMain
+      ? state.subjects
+      : state.demoCohort.find((st) => st.id === od.studentId)?.subjects || state.subjects;
+    let nextSubjects = ownerSubjects;
     const addedRecords: AttendanceRecord[] = [];
     const addedAudits: AuditLogEntry[] = [];
 
     if (decision === 'APPROVED') {
-      nextSubjects = state.subjects.map((subj) => {
+      nextSubjects = ownerSubjects.map((subj) => {
         if (!od.subjectIds.includes(subj.id)) return subj;
         const prevAtt = subj.attended;
         const prevTot = subj.total;
@@ -793,7 +857,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     setState((prev) => ({
       ...prev,
-      subjects: nextSubjects,
+      ...applySubjectsForStudent(prev, od.studentId, () => nextSubjects),
       records: [...addedRecords, ...prev.records],
       odRequests: prev.odRequests.map((o) =>
         o.id === odId
@@ -914,6 +978,25 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       }
     }
 
+    const newRecord: AttendanceRecord = {
+      id: `rec-fac-${Date.now()}`,
+      studentId: payload.studentId,
+      subjectId: targetSubject.id,
+      subjectCode: targetSubject.code,
+      subjectName: targetSubject.name,
+      date: toLocalDateIso(),
+      status: payload.newAttended > prevAtt ? 'PRESENT' : 'ABSENT',
+      periods: Math.max(1, Math.abs(payload.newTotal - prevTot)),
+      source: user.role === 'ADMIN' ? 'ADMIN_CORRECTION' : 'FACULTY_VERIFIED',
+      note: payload.reason.trim(),
+      previousAttended: prevAtt,
+      previousTotal: prevTot,
+      newAttended: payload.newAttended,
+      newTotal: payload.newTotal,
+      updatedBy: user.fullName,
+      createdAt: nowIso,
+    };
+
     setState((prev) => ({
       ...prev,
       subjects: isDemoMainStudent
@@ -933,33 +1016,20 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               : st
           )
         : prev.demoCohort,
-      records: isDemoMainStudent
-        ? [
-            {
-              id: `rec-fac-${Date.now()}`,
-              studentId: payload.studentId,
-              subjectId: targetSubject.id,
-              subjectCode: targetSubject.code,
-              subjectName: targetSubject.name,
-              date: toLocalDateIso(),
-              status: payload.newAttended > prevAtt ? 'PRESENT' : 'ABSENT',
-              periods: Math.max(1, Math.abs(payload.newTotal - prevTot)),
-              source: user.role === 'ADMIN' ? 'ADMIN_CORRECTION' : 'FACULTY_VERIFIED',
-              note: payload.reason.trim(),
-              previousAttended: prevAtt,
-              previousTotal: prevTot,
-              newAttended: payload.newAttended,
-              newTotal: payload.newTotal,
-              updatedBy: user.fullName,
-              createdAt: nowIso,
-            },
-            ...prev.records,
-          ]
-        : prev.records,
+      records: [newRecord, ...prev.records],
       rewards: nextRewards,
       auditLogs: [audit, ...prev.auditLogs],
       notifications: nextNotifications,
     }));
+
+    void syncSupabaseSubjectAttendance({
+      studentId: payload.studentId,
+      subjectId: targetSubject.id,
+      newAttended: payload.newAttended,
+      newTotal: payload.newTotal,
+      record: newRecord,
+      audit,
+    });
 
     return { ok: true };
   };
@@ -987,6 +1057,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       announcements: [ann, ...prev.announcements],
       notifications: [notif, ...prev.notifications],
     }));
+    void syncSupabaseAnnouncement(ann, user.id);
   };
 
   const createSquad = (name: string) => {
@@ -1250,9 +1321,9 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       return { ok: false, error: 'Only self-logged student records can be undone directly.' };
     }
 
-    const subj = state.subjects.find((s) => s.id === rec.subjectId);
+    const subj = activeSubjects.find((s) => s.id === rec.subjectId);
     const nextSubjects = subj
-      ? state.subjects.map((s) => {
+      ? activeSubjects.map((s) => {
           if (s.id !== rec.subjectId) return s;
           const revertedTotal = Math.max(0, s.total - rec.periods);
           const revertedAttended =
@@ -1264,7 +1335,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             remainingClasses: s.remainingClasses + rec.periods,
           };
         })
-      : state.subjects;
+      : activeSubjects;
 
     const rewardEventKey = `att-${rec.id}`;
     const rewardTx = state.rewards.find((tx) => tx.eventKey === rewardEventKey);
@@ -1281,7 +1352,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
     setState((prev) => ({
       ...prev,
-      subjects: nextSubjects,
+      ...applySubjectsForStudent(prev, rec.studentId, () => nextSubjects),
       records: prev.records.filter((r) => r.id !== recordId),
       rewards: prev.rewards.filter((tx) => tx.eventKey !== rewardEventKey),
     }));
@@ -1536,6 +1607,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     department: string;
     semesterNumber: number;
     heroAlias?: string;
+    email?: string;
+    password?: string;
   }) => {
     if (!user || user.role !== 'ADMIN') {
       return { ok: false, error: 'Only College Administrators can enroll students.' };
@@ -1561,6 +1634,44 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       semesterNumber: payload.semesterNumber || 5,
       subjects: enrolledSubjects,
     };
+
+    // If Admin also provided email + password, store student sign-in credentials so the student can log in directly
+    if (payload.email && payload.email.includes('@') && payload.password && payload.password.length >= 6) {
+      try {
+        const storedRaw = localStorage.getItem(REGISTERED_DEMO_USERS_KEY);
+        const storedUsers: Array<UserProfile & { passwordHash: string }> = storedRaw ? JSON.parse(storedRaw) : [];
+        const cleanEmail = payload.email.trim().toLowerCase();
+        if (storedUsers.some((u) => u.email.toLowerCase() === cleanEmail)) {
+          return { ok: false, error: 'A login account with this email already exists.' };
+        }
+        const newProfile: UserProfile = {
+          id: newId,
+          email: cleanEmail,
+          fullName: newStudent.fullName,
+          heroAlias: newStudent.heroAlias,
+          role: 'STUDENT',
+          department: newStudent.department,
+          semesterNumber: newStudent.semesterNumber,
+          registerNumber: regClean,
+          selectedHero: 'captain-campus',
+          unlockedAuras: ['default-spark'],
+          equippedAura: 'default-spark',
+          coins: 50,
+          xp: 0,
+          dailyStreak: 0,
+          weeklyStreak: 0,
+          lastAttendanceDate: null,
+          classesAttendedToday: 0,
+          squadPrivacyShowExact: false,
+          anonymizeInPublicLists: false,
+          isDemo: true,
+        };
+        storedUsers.push({ ...newProfile, passwordHash: btoa(payload.password) });
+        localStorage.setItem(REGISTERED_DEMO_USERS_KEY, JSON.stringify(storedUsers));
+      } catch {
+        // ignore storage error
+      }
+    }
     const audit: AuditLogEntry = {
       id: `aud-stu-${Date.now()}`,
       actorId: user.id,
@@ -1681,6 +1792,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   };
 
+  const scopedRecords = useMemo(() => {
+    if (!user || user.role !== 'STUDENT') return state.records;
+    return state.records.filter((r) => r.studentId === user.id);
+  }, [state.records, user]);
+
   const unreadNotificationCount = useMemo(
     () => state.notifications.filter((n) => !n.read).length,
     [state.notifications]
@@ -1690,6 +1806,8 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     <AppStateContext.Provider
       value={{
         ...state,
+        subjects: activeSubjects,
+        records: scopedRecords,
         heroMood,
         heroMessage,
         activeThanosModal,

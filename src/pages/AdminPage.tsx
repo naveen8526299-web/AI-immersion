@@ -54,6 +54,8 @@ export const AdminPage: React.FC = () => {
   const [enrollDept, setEnrollDept] = useState('CSE (CoE AI)');
   const [enrollSem, setEnrollSem] = useState(5);
   const [enrollAlias, setEnrollAlias] = useState('');
+  const [enrollEmail, setEnrollEmail] = useState('');
+  const [enrollPassword, setEnrollPassword] = useState('');
   const [enrollFeedback, setEnrollFeedback] = useState<string | null>(null);
 
   // Official Notification Broadcast state
@@ -64,19 +66,22 @@ export const AdminPage: React.FC = () => {
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
 
   const allStudents = useMemo(
-    () => [
-      {
-        id: 'demo-student-1',
-        fullName: 'Arjun Karthik',
-        heroAlias: 'CyberShield-07',
-        registerNumber: '22CSE042',
-        department: 'CSE (CoE AI)',
-        semesterNumber: 5,
-        subjects,
-      },
-      ...demoCohort,
-    ],
-    [subjects, demoCohort]
+    () =>
+      user && !user.isDemo
+        ? demoCohort
+        : [
+            {
+              id: 'demo-student-1',
+              fullName: 'Arjun Karthik',
+              heroAlias: 'CyberShield-07',
+              registerNumber: '22CSE042',
+              department: 'CSE (CoE AI)',
+              semesterNumber: 5,
+              subjects,
+            },
+            ...demoCohort,
+          ],
+    [subjects, demoCohort, user]
   );
 
   const filteredStudents = allStudents.filter((s) => {
@@ -104,15 +109,23 @@ export const AdminPage: React.FC = () => {
       department: enrollDept,
       semesterNumber: enrollSem,
       heroAlias: enrollAlias,
+      email: enrollEmail,
+      password: enrollPassword,
     });
     if (!res.ok) {
       setEnrollFeedback(res.error || 'Could not enroll student.');
       return;
     }
-    setEnrollFeedback(`Enrolled ${enrollName.trim()} (${enrollReg.trim().toUpperCase()}) into college directory.`);
+    setEnrollFeedback(
+      `Enrolled ${enrollName.trim()} (${enrollReg.trim().toUpperCase()}) into college directory${
+        enrollEmail.trim() ? ` with sign-in account ${enrollEmail.trim()}` : ''
+      }.`
+    );
     setEnrollName('');
     setEnrollReg('');
     setEnrollAlias('');
+    setEnrollEmail('');
+    setEnrollPassword('');
   };
 
   const handleBroadcastNotification = (e: React.FormEvent) => {
@@ -324,6 +337,27 @@ export const AdminPage: React.FC = () => {
                   className="col-span-2 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-2.5 py-2"
                 />
               </div>
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Student Login Email (Optional)</label>
+              <input
+                type="email"
+                value={enrollEmail}
+                onChange={(e) => setEnrollEmail(e.target.value)}
+                placeholder="student@campus.edu"
+                className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold mb-1">Initial Password (min 6 chars)</label>
+              <input
+                type="password"
+                minLength={6}
+                value={enrollPassword}
+                onChange={(e) => setEnrollPassword(e.target.value)}
+                placeholder="Optional login password"
+                className="w-full rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-300 dark:border-white/15 px-3 py-2"
+              />
             </div>
           </div>
           {enrollFeedback && (
